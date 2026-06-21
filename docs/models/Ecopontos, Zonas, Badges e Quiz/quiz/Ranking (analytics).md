@@ -1,0 +1,5 @@
+| #   | Método | Rota                         | Descrição                                           | Auth                     | Fluxo                                                 |
+| --- | ------ | ---------------------------- | --------------------------------------------------- | ------------------------ | ----------------------------------------------------- |
+| Q7  | `GET`  | `/quiz/ranking/zona/:zonaId` | Ranking anónimo por zona — semanal (RF-19)          | CIDADAO (opt-in)         | FastAPI → Redis `ranking:zona:{id}:semanal` TTL 10min |
+| Q8  | `GET`  | `/quiz/ranking/global`       | Ranking global anónimo                              | CIDADAO (opt-in)         | FastAPI → Redis `ranking:global:semanal` TTL 10min    |
+| Q9  | `GET`  | `/quiz/:id/estatisticas`     | Taxa de acerto por pergunta, distribuição de scores | GESTOR, ADMIN | FastAPI → PG réplica agregação                        |

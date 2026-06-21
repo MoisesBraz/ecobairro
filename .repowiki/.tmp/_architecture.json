@@ -1,0 +1,188 @@
+{
+  "repo_name": "ecobairro",
+  "sections": [
+    {
+      "title": "Project Overview",
+      "output_dir": "Overview",
+      "pages": [
+        "Project Overview",
+        "Tech Stack",
+        "Quick Start Guide"
+      ],
+      "key_files": [
+        "README.md"
+      ]
+    },
+    {
+      "title": "Architecture & Design",
+      "output_dir": "Architecture",
+      "pages": [
+        "System Architecture",
+        "Data Flow",
+        "Layered Architecture"
+      ],
+      "key_files": [
+        "docs/04-Modelo-de-Conceitos.md",
+        "docs/07-Modelo-de-Dados.md"
+      ]
+    },
+    {
+      "title": "Database Schema",
+      "output_dir": "Database",
+      "pages": [
+        "Schema Overview",
+        "Models Reference",
+        "Relationships & Indexes",
+        "Redis & Caching"
+      ],
+      "key_files": [
+        "docs/models/Cidadão/base de dados/2.8 Mapa de relacionamentos.md",
+        "docs/models/Ecopontos, Zonas, Badges e Quiz/ecopontos/base de dados/2.2 Schema PostgreSQL — Ecopontos.md",
+        "docs/models/Cidadão/base de dados/3.2 Redis — cache e operações rápidas.md"
+      ]
+    },
+    {
+      "title": "API Reference",
+      "output_dir": "API",
+      "pages": [
+        "REST Endpoints",
+        "GraphQL Reference",
+        "API Request & Response Formats"
+      ],
+      "key_files": [
+        "apps/api/src/users/users.controller.ts",
+        "apps/api/src/reports/reports.controller.ts",
+        "apps/api/src/ecopontos/ecopontos.controller.ts"
+      ]
+    },
+    {
+      "title": "Authentication & Security",
+      "output_dir": "Security",
+      "pages": [
+        "Authentication Flow",
+        "RBAC & Permissions",
+        "Two-Factor Authentication"
+      ],
+      "key_files": [
+        "apps/api/src/auth/auth.controller.ts",
+        "apps/api/src/auth/two-factor.controller.ts",
+        "apps/api/src/security/security.controller.ts"
+      ]
+    },
+    {
+      "title": "Frontend Architecture",
+      "output_dir": "Frontend",
+      "pages": [
+        "Frontend Overview",
+        "Component Library",
+        "Routing & Navigation"
+      ],
+      "key_files": [
+        "apps/web/src/main.tsx",
+        "apps/web/src/routeTree.gen.ts",
+        "apps/web/src/components/layout/DashboardLayout.tsx"
+      ]
+    },
+    {
+      "title": "Background Jobs",
+      "output_dir": "Jobs",
+      "pages": [
+        "Background Tasks Overview",
+        "Task Queues",
+        "Celery Configuration"
+      ],
+      "key_files": [
+        "apps/api/src/fila/fila.controller.ts"
+      ]
+    },
+    {
+      "title": "Real-time & WebSocket",
+      "output_dir": "Realtime",
+      "pages": [
+        "WebSockets Architecture",
+        "Real-time Events",
+        "IoT Telemetry Streams"
+      ],
+      "key_files": [
+        "docs/models/IoT e Dispositivos/IoT/2.2 Ingestão de Telemetria.md",
+        "docs/models/IoT e Dispositivos/IoT/base de dados/1.5 Schema PostgreSQL — iot_alertas.md"
+      ]
+    },
+    {
+      "title": "Financial Operations",
+      "output_dir": "Finance",
+      "pages": [
+        "Payments Architecture",
+        "Gamification Rewards",
+        "Transaction Flow"
+      ],
+      "key_files": [
+        "apps/api/src/gamification/gamification.controller.ts",
+        "apps/api/src/campanhas/campanhas.controller.ts"
+      ]
+    },
+    {
+      "title": "Deployment & Operations",
+      "output_dir": "Operations",
+      "pages": [
+        "Docker Compose Setup",
+        "Deployment Pipelines",
+        "Infrastructure Overview"
+      ],
+      "key_files": [
+        "infra/compose/docker-compose.yml",
+        "infra/compose/docker-compose.prod.yml",
+        "apps/api/Dockerfile"
+      ]
+    },
+    {
+      "title": "Search & Indexing",
+      "output_dir": "Search",
+      "pages": [
+        "Search Architecture",
+        "Indexing Strategy",
+        "Analytics & Queries"
+      ],
+      "key_files": [
+        "apps/api/src/analytics/analytics.controller.ts"
+      ]
+    },
+    {
+      "title": "Notification System",
+      "output_dir": "Notifications",
+      "pages": [
+        "Notification Architecture",
+        "Email & SMS Providers",
+        "Push Notifications"
+      ],
+      "key_files": [
+        "docs/models/Reports, Recolhas, Comunicação e Operacional/notificacoes/4.2 Endpoints REST — Notificações.md",
+        "docs/models/IoT e Dispositivos/IoT/2.4 Contactos SMS (RF-27).md"
+      ]
+    },
+    {
+      "title": "Media & File Handling",
+      "output_dir": "Media",
+      "pages": [
+        "File Uploads",
+        "Media Storage",
+        "Asset Management"
+      ],
+      "key_files": [
+        "apps/api/src/partilhas/partilhas.controller.ts"
+      ]
+    },
+    {
+      "title": "Troubleshooting & FAQ",
+      "output_dir": "FAQ",
+      "pages": [
+        "Common Issues",
+        "Deployment Troubleshooting",
+        "API Debugging"
+      ],
+      "key_files": [
+        "README.md"
+      ]
+    }
+  ]
+}

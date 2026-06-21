@@ -1,0 +1,235 @@
+{
+  "main": {
+    "id": "027a9ce44b7f99b1",
+    "type": "split",
+    "children": [
+      {
+        "id": "f6be13b58f193d45",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "5fe7e4dd07e2f416",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "02-Requisitos/M01-Mapa-Ecopontos.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "M01-Mapa-Ecopontos"
+            }
+          },
+          {
+            "id": "9b61ca740312540b",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "06-Arquitetura.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "06-Arquitetura"
+            }
+          }
+        ],
+        "currentTab": 1
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "9db96426ce05ff06",
+    "type": "split",
+    "children": [
+      {
+        "id": "0e93938d40f20502",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "bfcc5a00ab1034a7",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Explorador de ficheiros"
+            }
+          },
+          {
+            "id": "77cfda18171cd40a",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Procurar"
+            }
+          },
+          {
+            "id": "5a9001b16f3ada78",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Marcadores"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "f7c772581cfb84e7",
+    "type": "split",
+    "children": [
+      {
+        "id": "7b98172d343c231f",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "7f2a4df88990365f",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "01-Introducao.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks para 01-Introducao"
+            }
+          },
+          {
+            "id": "9644bfe0e5e78b88",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "01-Introducao.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Links externos de 01-Introducao"
+            }
+          },
+          {
+            "id": "edbba1cb6cff1f40",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Etiquetas"
+            }
+          },
+          {
+            "id": "eed9d8b70860d4f3",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "Todas as propriedades"
+            }
+          },
+          {
+            "id": "196106ad158c6756",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "01-Introducao.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Índice de 01-Introducao"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Abrir Quick Switcher": false,
+      "graph:Abrir Visualização de diagrama de grafo": false,
+      "canvas:Criar novo Canvas": false,
+      "daily-notes:Abrir nota de hoje": false,
+      "templates:Inserir templates": false,
+      "command-palette:Abrir paleta de comando": false,
+      "bases:Criar nova base": false
+    }
+  },
+  "active": "9b61ca740312540b",
+  "lastOpenFiles": [
+    "07-Modelo-de-Dados.md",
+    "06-Arquitetura.md.tmp.20774.ed1b07b37b3d",
+    "06-Arquitetura.md",
+    "06-Arquitetura.md.tmp.20774.56bfa89fdd2b",
+    "05-Diagrama-de-Classes.md",
+    "04-Modelo-de-Conceitos.md",
+    "03-Casos-de-Uso.md",
+    "02-Requisitos.md",
+    "01-Introducao.md",
+    "02-Requisitos/M02-IoT-Operacoes.md",
+    "02-Requisitos/M01-Mapa-Ecopontos.md",
+    "02-Requisitos/RNF-Nao-Funcionais.md",
+    "02-Requisitos/M11-Frota-Equipas.md",
+    "02-Requisitos/M10-Acesso-Inclusivo-IoT.md",
+    "02-Requisitos/M09-Utilizadores-Perfis.md",
+    "02-Requisitos/M08-Dashboards.md",
+    "02-Requisitos/M07-Beneficios.md",
+    "02-Requisitos/M06-Gamificacao.md",
+    "02-Requisitos/M05-Comunicacao.md",
+    "02-Requisitos/M04-Monos-Partilha.md",
+    "02-Requisitos/M03-Reports.md",
+    "models/init e conclusao.md",
+    "02-Requisitos/M10-Acesso-Inclusivo-IoT.md.tmp.20774.094da649c144",
+    "02-Requisitos/M09-Utilizadores-Perfis.md.tmp.20774.ebb66c71955f",
+    "02-Requisitos/M08-Dashboards.md.tmp.20774.77cc74256a59",
+    "02-Requisitos/M07-Beneficios.md.tmp.20774.7f15b982ccbf",
+    "02-Requisitos/M06-Gamificacao.md.tmp.20774.4cea91127c34",
+    "02-Requisitos/M05-Comunicacao.md.tmp.20774.d1d553864428",
+    "02-Requisitos/M04-Monos-Partilha.md.tmp.20774.c1ab9cc61a9b",
+    "02-Requisitos/M03-Reports.md.tmp.20774.204f9e6ac1f5",
+    "Home.md"
+  ]
+}

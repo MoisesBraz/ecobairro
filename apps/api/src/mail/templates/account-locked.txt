@@ -1,0 +1,9 @@
+Conta bloqueada temporariamente
+
+Detetámos várias tentativas de login falhadas na sua conta. Por segurança,
+bloqueámos o acesso por {{minutes}} minutos.
+
+Se não foi você que tentou entrar, altere a password assim que o bloqueio
+terminar e ative o 2FA.
+
+— ecoBairro

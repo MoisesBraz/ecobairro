@@ -1,0 +1,30 @@
+{
+  "name": "ecobairro",
+  "private": true,
+  "packageManager": "pnpm@10.30.1",
+  "scripts": {
+    "lint": "pnpm --dir packages/config lint && pnpm --dir packages/contracts lint && pnpm --dir apps/web lint && pnpm --dir apps/api lint",
+    "typecheck": "pnpm --dir packages/config typecheck && pnpm --dir packages/contracts typecheck && pnpm --dir apps/web typecheck && pnpm --dir apps/api typecheck",
+    "test": "pnpm --dir apps/api test && pnpm --dir apps/web test",
+    "test:api": "pnpm --dir apps/api test",
+    "test:web": "pnpm --dir apps/web test",
+    "compose:config": "docker compose -f infra/compose/docker-compose.yml config",
+    "compose:up": "docker compose -f infra/compose/docker-compose.yml up --build -d",
+    "compose:down": "docker compose -f infra/compose/docker-compose.yml down",
+    "compose:logs": "docker compose -f infra/compose/docker-compose.yml logs -f",
+    "compose:logs:web": "docker compose -f infra/compose/docker-compose.yml logs -f web",
+    "compose:logs:api": "docker compose -f infra/compose/docker-compose.yml logs -f api",
+    "compose:logs:analytics": "docker compose -f infra/compose/docker-compose.yml logs -f analytics",
+    "compose:logs:db": "docker compose -f infra/compose/docker-compose.yml logs -f postgres redis nginx",
+    "compose:ps": "docker compose -f infra/compose/docker-compose.yml ps",
+    "compose:restart": "docker compose -f infra/compose/docker-compose.yml down && docker compose -f infra/compose/docker-compose.yml up --build -d"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.6.0",
+    "eslint": "^10.2.1",
+    "globals": "^17.5.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.60.1"
+  }
+}

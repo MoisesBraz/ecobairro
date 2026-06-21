@@ -1,0 +1,56 @@
+stages:
+  - test
+  - deploy
+
+test_project:
+  stage: test
+  tags:
+    - proxmox
+  variables:
+    GIT_CLEAN_FLAGS: none
+  before_script:
+    - docker run --rm -v "$PWD":/app -w /app alpine sh -c "chown -R $(id -u):$(id -g) ."
+    - git clean -ffdx
+  script:
+    - docker run --rm -v "$PWD":/app -w /app node:20-alpine sh -c "npm install -g pnpm && pnpm config set store-dir /tmp/.pnpm-store && pnpm install && pnpm --dir packages/config build && cd apps/api && pnpm prisma generate && cd ../.. && pnpm test"
+  after_script:
+    - docker run --rm -v "$PWD":/app -w /app alpine sh -c "chown -R $(id -u):$(id -g) ."
+  only:
+    - main
+
+deploy_production:
+  stage: deploy
+  tags:
+    - proxmox
+  before_script:
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - echo "$DEPLOY_SSH_KEY_B64" | tr -d '\r\n ' | base64 -d > ~/.ssh/id_ed25519
+    - chmod 600 ~/.ssh/id_ed25519
+    - echo "StrictHostKeyChecking no" > ~/.ssh/config
+  script:
+    # 1. Criar o arquivo .env localmente no Runner
+    - echo "POSTGRES_USER=$POSTGRES_USER" > .env
+    - echo "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" >> .env
+    - echo "POSTGRES_DB=$POSTGRES_DB" >> .env
+    - echo "JWT_ACCESS_SECRET=$JWT_ACCESS_SECRET" >> .env
+    - echo "JWT_REFRESH_SECRET=$JWT_REFRESH_SECRET" >> .env
+    - echo "APP_BASE_URL=$APP_BASE_URL" >> .env
+    - echo "CLOUDFLARE_TUNNEL_TOKEN=$CLOUDFLARE_TUNNEL_TOKEN" >> .env
+    - echo "SMTP_HOST=$SMTP_HOST" >> .env
+    - echo "SMTP_PORT=$SMTP_PORT" >> .env
+    - echo "SMTP_USER=$SMTP_USER" >> .env
+    - echo "SMTP_PASS=$SMTP_PASS" >> .env
+    - echo "SMTP_FROM=$SMTP_FROM" >> .env
+    - echo "SMTP_SECURE=$SMTP_SECURE" >> .env
+    - echo "VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID" >> .env
+    - echo "GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID" >> .env
+    - echo "NODE_ENV=production" >> .env
+
+    # 2. Criar a pasta no CT2 (Prod) e sincronizar usando a chave explicitamente
+    - ssh -i ~/.ssh/id_ed25519 "$SERVER_USER@$SERVER_IP" "mkdir -p ~/apps/ecobairro"
+    - rsync -av --delete -e "ssh -i ~/.ssh/id_ed25519" --exclude='.git/' --exclude='node_modules/' ./ "$SERVER_USER@$SERVER_IP:~/apps/ecobairro/"
+
+    # 3. Build e arranque no destino remoto usando a chave explicitamente
+    - ssh -i ~/.ssh/id_ed25519 "$SERVER_USER@$SERVER_IP" "cd ~/apps/ecobairro/infra/compose && docker compose -f docker-compose.prod.yml --env-file ../../.env up -d --build && docker image prune -f"
+  only:
+    - main

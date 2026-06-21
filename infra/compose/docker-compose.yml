@@ -1,0 +1,222 @@
+name: ecobairro
+
+x-js-workspace-volumes: &js-workspace-volumes
+  - ../../:/workspace
+  - pnpm-store:/pnpm/store
+  - root-node-modules:/workspace/node_modules
+  - web-node-modules:/workspace/apps/web/node_modules
+  - api-node-modules:/workspace/apps/api/node_modules
+  - contracts-node-modules:/workspace/packages/contracts/node_modules
+  - config-node-modules:/workspace/packages/config/node_modules
+  - tsconfig-node-modules:/workspace/packages/tsconfig/node_modules
+  - eslint-config-node-modules:/workspace/packages/eslint-config/node_modules
+
+services:
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    working_dir: /workspace
+    command:
+      - /bin/sh
+      - /workspace/infra/scripts/start-js-service.sh
+      - '@ecobairro/web'
+      - dev
+      - --host
+      - 0.0.0.0
+      - --port
+      - '5173'
+    environment:
+      NODE_ENV: development
+      CHOKIDAR_USEPOLLING: 'true'
+      VITE_API_BASE_URL: /api
+      VITE_ANALYTICS_BASE_URL: /analytics
+    volumes: *js-workspace-volumes
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:5173').then((response)=>process.exit(response.ok?0:1)).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    working_dir: /workspace
+    command:
+      - /bin/sh
+      - /workspace/infra/scripts/start-js-service.sh
+      - '@ecobairro/api'
+      - dev
+    environment:
+      NODE_ENV: development
+      PORT: '3000'
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-access-secret-change-me}
+      JWT_ACCESS_TTL_MINUTES: ${JWT_ACCESS_TTL_MINUTES:-15}
+      REFRESH_TOKEN_TTL_DAYS: ${REFRESH_TOKEN_TTL_DAYS:-7}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
+      PASSWORD_RESET_TTL_MINUTES: ${PASSWORD_RESET_TTL_MINUTES:-30}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@ecobairro.local}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ecobairro}:${POSTGRES_PASSWORD:-ecobairro}@postgres:5432/${POSTGRES_DB:-ecobairro}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes: *js-workspace-volumes
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/ready').then((response)=>process.exit(response.ok?0:1)).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - ${MAILPIT_WEB_PORT:-8025}:8025
+      - ${MAILPIT_SMTP_PORT:-1025}:1025
+
+  analytics:
+    build:
+      context: ../..
+      dockerfile: apps/analytics/Dockerfile
+    working_dir: /app
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - '8000'
+      - --reload
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ecobairro}:${POSTGRES_PASSWORD:-ecobairro}@postgres:5432/${POSTGRES_DB:-ecobairro}
+      # Mesmo segredo que o NestJS usa para assinar o access token (verificação HS256).
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-access-secret-change-me}
+      # Revogação imediata: lê a blacklist `revoked_user:{id}` escrita pelo NestJS.
+      REDIS_URL: redis://redis:6379/0
+      # OSRM para o cálculo de rotas (OP4). Default = demo público OSM (precisa de
+      # internet de saída); em produção apontar para um OSRM self-hosted.
+      OSRM_BASE_URL: ${OSRM_BASE_URL:-https://router.project-osrm.org}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../../apps/analytics:/app
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; import sys; sys.exit(0 if urlopen('http://127.0.0.1:8000/ready').status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  postgres:
+    image: postgis/postgis:16-3.4
+    ports:
+      - ${POSTGRES_PORT:-5432}:5432
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ecobairro}
+      POSTGRES_USER: ${POSTGRES_USER:-ecobairro}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ecobairro}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
+    ports:
+      - ${NGINX_PORT:-8080}:80
+    volumes:
+      - ../nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+
+  tileserver:
+    image: maptiler/tileserver-gl:latest
+    depends_on:
+      osm-updater:
+        condition: service_healthy
+    volumes:
+      - osm-data:/data
+    command: >
+      --mbtiles /data/portugal.mbtiles
+
+  osm-updater:
+    build:
+      context: ../../apps/tileserver/updater
+      dockerfile: Dockerfile
+    volumes:
+      - osm-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - DATA_DIR=/data
+      - CRON_INTERVAL_HOURS=24
+      - OSM_VOLUME_NAME=ecobairro_osm-data
+    command: ["tsx", "src/index.ts"]
+    healthcheck:
+      test: ["CMD", "test", "-f", "/data/portugal.mbtiles"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30m
+
+
+volumes:
+  postgres-data:
+  osm-data:
+  pnpm-store:
+  root-node-modules:
+  web-node-modules:
+  api-node-modules:
+  contracts-node-modules:
+  config-node-modules:
+  tsconfig-node-modules:
+  eslint-config-node-modules:

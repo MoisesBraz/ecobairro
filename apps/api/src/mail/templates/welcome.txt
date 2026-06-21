@@ -1,0 +1,11 @@
+Bem-vindo ao ecoBairro!
+
+A sua conta foi criada com sucesso. Comece já a contribuir para uma cidade
+mais sustentável: reporte problemas urbanos, consulte ecopontos da sua zona,
+partilhe objetos com vizinhos.
+
+Aceder à plataforma: {{appUrl}}
+
+Recomendamos ativar a autenticação de dois fatores nas Definições de Segurança.
+
+— ecoBairro

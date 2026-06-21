@@ -1,0 +1,441 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  CIDADAO
+  OPERADOR
+  GESTOR
+  ADMIN
+}
+
+enum ReportStatus {
+  PENDENTE
+  ANALISE
+  RESOLVIDO
+  REJEITADO
+}
+
+enum TwoFactorType {
+  NONE
+  TOTP_APP
+  EMAIL
+}
+
+enum SecurityEventType {
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  PASSWORD_CHANGED
+  TWO_FACTOR_ENABLED
+  TWO_FACTOR_DISABLED
+  ACCOUNT_LOCKED
+  DEVICE_REVOKED
+}
+
+enum QuizTipo {
+  SEMANAL
+  DIARIO
+}
+
+enum QuizCategoria {
+  ORGANICOS
+  RECICLAGEM
+  LEGISLACAO
+  GERAL
+}
+
+model User {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String    @unique
+  passwordHash  String    @map("password_hash")
+  phone         String?
+  emailVerified Boolean   @default(false) @map("email_verified")
+  role          UserRole
+  criadoEm      DateTime  @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm  DateTime  @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+  eliminadoEm   DateTime? @map("eliminado_em") @db.Timestamptz(6)
+
+  // 2FA & recuperação
+  twoFactorEnabled Boolean       @default(false) @map("two_factor_enabled")
+  twoFactorType    TwoFactorType @default(NONE) @map("two_factor_type")
+  twoFactorSecret  String?       @map("two_factor_secret")
+  backupCodes      String[]      @default([]) @map("backup_codes")
+
+
+  cidadaoPerfil     CidadaoPerfil?
+  reports           Report[]
+  partilhas         Partilha[]
+  recolhas          Recolha[]
+  ecopontoFavoritos CidadaoEcopontoFavorito[]
+  securityLogs      SecurityLog[]
+  activeSessions    ActiveSession[]
+  equipasMembro     EquipaMembro[]
+  rotasAtribuidas   Rota[]
+
+  @@index([role])
+  @@map("users")
+}
+
+model SecurityLog {
+  id        String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String            @map("user_id") @db.Uuid
+  event     SecurityEventType
+  ipAddress String            @map("ip_address")
+  userAgent String?           @map("user_agent")
+  criadoEm  DateTime          @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, criadoEm])
+  @@map("security_logs")
+}
+
+model ActiveSession {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  refreshToken String   @unique @map("refresh_token")
+  ipAddress    String   @map("ip_address")
+  userAgent    String?  @map("user_agent")
+  expiresAt    DateTime @map("expires_at") @db.Timestamptz(6)
+  criadoEm     DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("active_sessions")
+}
+
+model CidadaoPerfil {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String   @unique @map("user_id") @db.Uuid
+  nomeCompleto      String?  @map("nome_completo")
+  gamificationOptIn Boolean  @default(false) @map("gamification_opt_in")
+  notificacaoPrefs  Json?    @map("notificacao_prefs")
+  dashboardWidgets  Json?    @map("dashboard_widgets")
+  rgpdAccepted      Boolean  @map("rgpd_accepted")
+  criadoEm          DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm      DateTime @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("cidadao_perfis")
+}
+
+model Report {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  titulo       String
+  tipo         String
+  descricao    String
+  local        String
+  imagemUrl    String?      @map("imagem_url")
+  status       ReportStatus @default(PENDENTE)
+  userId       String       @map("user_id") @db.Uuid
+  lat          Float?
+  lng          Float?
+  // Coluna PostGIS gerada de lng/lat — ver migração 20260620130000_reports_geo.
+  // Unsupported só para o Prisma a reconhecer; geometria + índice GiST geridos via SQL.
+  geom         Unsupported("geometry(Point, 4326)")?
+  criadoEm     DateTime     @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm DateTime     @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([criadoEm])
+  @@index([userId])
+  @@map("reports")
+}
+
+model Ecoponto {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  nome              String
+  codigo            String?
+  morada            String   @default("")
+  codigoPostal      String?  @map("codigo_postal")
+  zona              String?
+  distanciaLabel    String   @default("") @map("distancia_label")
+  ocupacao          Int
+  tipos             Json     @default("[]")
+  sensorEstado      String   @default("online") @map("sensor_estado")
+  ultimaRecolha     String?  @map("ultima_recolha")
+  ultimaAtualizacao String?  @map("ultima_atualizacao")
+  lat               Float    @default(40.6409)
+  lng               Float    @default(-8.6537)
+  // Coluna PostGIS gerada (GENERATED ALWAYS ... STORED) a partir de lng/lat — ver
+  // migração 20260620120000_postgis_ecopontos_geom. Declarada como Unsupported só para o
+  // Prisma a reconhecer (sem drift); a geometria e o índice GiST são geridos via SQL.
+  geom              Unsupported("geometry(Point, 4326)")?
+  mapTileUrl        String?  @map("map_tile_url")
+  bateria           Int?
+  temperatura       Float?
+  ordem             Int      @default(0)
+  ativo             Boolean  @default(true)
+  criadoEm          DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  favoritos CidadaoEcopontoFavorito[]
+
+  @@map("ecopontos")
+}
+
+model CidadaoEcopontoFavorito {
+  userId     String   @map("user_id") @db.Uuid
+  ecopontoId String   @map("ecoponto_id") @db.Uuid
+  criadoEm   DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ecoponto Ecoponto @relation(fields: [ecopontoId], references: [id], onDelete: Cascade)
+
+  @@id([userId, ecopontoId])
+  @@index([userId])
+  @@map("cidadao_ecopontos_favoritos")
+}
+
+model Tarefa {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  titulo     String
+  local      String
+  tipo       String
+  prioridade String   @default("normal")
+  estado     String   @default("pendente")
+  atribuido  String?
+  criadoEm   DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  @@index([estado])
+  @@map("tarefas")
+}
+
+model Recolha {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tipo         String
+  subtipo      String
+  morada       String
+  status       String   @default("pendente")
+  obs          String?
+  dataPrevista String?  @map("data_prevista")
+  userId       String?  @map("user_id") @db.Uuid
+  criadoEm     DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([criadoEm])
+  @@map("recolhas")
+}
+
+model Campanha {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  titulo       String
+  corpo        String
+  estado       String   @default("rascunho")
+  dataValidade DateTime @map("data_validade") @db.Timestamptz(6)
+  autor        String   @default("Câmara de Aveiro")
+  criadoEm     DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  @@index([estado])
+  @@map("campanhas")
+}
+
+model AuditLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  utilizador String
+  papel      String
+  acao       String
+  descricao  String
+  ip         String   @default("0.0.0.0")
+  criadoEm   DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  @@index([criadoEm])
+  @@map("audit_logs")
+}
+
+model Rota {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  nome       String
+  operador   String
+  estado     String   @default("pendente")
+  ecopontos  Int      @default(0)
+  distancia  String   @default("")
+  duracao    String   @default("")
+  waypoints  Json     @default("[]")
+  // Traçado por estradas (OSRM) e paragens enriquecidas, gerados pelo OP4. Vazios nas
+  // rotas antigas/seed (o frontend cai para `waypoints`).
+  geometria  Json     @default("[]")
+  paragens   Json     @default("[]")
+  zona       String?
+  cor        String   @default("#60a5fa")
+  equipaId   String?  @map("equipa_id") @db.Uuid
+  operadorId String?  @map("operador_id") @db.Uuid
+  criadoEm   DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  equipa      Equipa? @relation(fields: [equipaId], references: [id], onDelete: SetNull)
+  operadorRef User?   @relation(fields: [operadorId], references: [id], onDelete: SetNull)
+
+  @@index([equipaId])
+  @@index([operadorId])
+  @@map("rotas")
+}
+
+model Equipa {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  nome         String
+  criadoEm     DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+  atualizadoEm DateTime @updatedAt @map("atualizado_em") @db.Timestamptz(6)
+
+  membros EquipaMembro[]
+  rotas   Rota[]
+
+  @@map("equipas")
+}
+
+model EquipaMembro {
+  id       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  equipaId String   @map("equipa_id") @db.Uuid
+  userId   String   @map("user_id") @db.Uuid
+  criadoEm DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  equipa Equipa @relation(fields: [equipaId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([equipaId, userId])
+  @@index([userId])
+  @@map("equipa_membros")
+}
+
+model Partilha {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  titulo    String
+  autorNome String   @map("autor_nome")
+  zona      String
+  categoria String   @default("moveis")
+  imagemUrl String?  @map("imagem_url")
+  userId    String?  @map("user_id") @db.Uuid
+  criadoEm  DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([criadoEm])
+  @@map("partilhas")
+}
+
+model Noticia {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  titulo          String
+  resumo          String
+  imagemUrl       String   @map("imagem_url")
+  conteudo        String   @default("")
+  tag             String   @default("Geral")
+  destaque        Boolean  @default(false)
+  publishedAt     DateTime @map("published_at") @db.Timestamptz(6)
+  tempoLeituraMin Int      @default(3) @map("tempo_leitura_min")
+
+  @@index([publishedAt])
+  @@map("noticias")
+}
+
+model QuizDesafio {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  titulo         String
+  bonusXp        Int      @map("bonus_xp")
+  tempoLimiteMin Int      @map("tempo_limite_min")
+  ano            Int
+  ativo          Boolean  @default(true)
+  criadoEm       DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  @@map("quiz_desafios")
+}
+
+// Banco/pool de quizzes (RF-19). As perguntas são sorteadas deste pool por
+// sessão; não há um quiz "fixo" por admin (ver gamification/CLAUDE.md).
+model Quiz {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  titulo          String
+  descricao       String?
+  tipo            QuizTipo       @default(SEMANAL)
+  disponivelDe    DateTime       @map("disponivel_de") @db.Timestamptz(6)
+  disponivelAte   DateTime       @map("disponivel_ate") @db.Timestamptz(6)
+  numeroPerguntas Int            @map("numero_perguntas")
+  pontosMaximo    Int            @default(0) @map("pontos_maximo")
+  categoriaTema   QuizCategoria? @map("categoria_tema")
+  ativo           Boolean        @default(true)
+  criadoPor       String?        @map("criado_por") @db.Uuid
+  criadoEm        DateTime       @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  perguntas QuizPergunta[]
+
+  @@index([tipo, ativo])
+  @@map("quizzes")
+}
+
+model QuizPergunta {
+  id                  String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  quizId              String        @map("quiz_id") @db.Uuid
+  ordem               Int
+  textoPergunta       String        @map("texto_pergunta")
+  explicacaoEducativa String        @map("explicacao_educativa")
+  categoria           QuizCategoria @default(GERAL)
+  pontos              Int           @default(10)
+  imagemUrl           String?       @map("imagem_url")
+  criadoEm            DateTime      @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  quiz   Quiz        @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  opcoes QuizOpcao[]
+
+  @@unique([quizId, ordem])
+  @@index([categoria])
+  @@map("quiz_perguntas")
+}
+
+model QuizOpcao {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  perguntaId String   @map("pergunta_id") @db.Uuid
+  ordem      Int
+  texto      String
+  correta    Boolean  @default(false)
+  criadoEm   DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  pergunta QuizPergunta @relation(fields: [perguntaId], references: [id], onDelete: Cascade)
+
+  @@unique([perguntaId, ordem])
+  @@index([perguntaId])
+  @@map("quiz_opcoes")
+}
+
+model QuizSessao {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cidadaoId      String   @map("cidadao_id") @db.Uuid
+  quizId         String   @map("quiz_id") @db.Uuid
+  tipo           QuizTipo @default(SEMANAL)
+  respostas      Json
+  scoreObtido    Int      @map("score_obtido")
+  totalPerguntas Int      @map("total_perguntas")
+  concluidoEm    DateTime @default(now()) @map("concluido_em") @db.Timestamptz(6)
+
+  @@index([cidadaoId, concluidoEm])
+  @@index([cidadaoId, tipo, concluidoEm])
+  @@index([quizId, concluidoEm])
+  @@map("quiz_sessoes")
+}
+
+model CookieConsentLog {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deviceId    String   @map("device_id")
+  userId      String?  @map("user_id") @db.Uuid
+  analytics   Boolean
+  marketing   Boolean
+  preferences Boolean
+  ipHash      String?  @map("ip_hash")
+  criadoEm    DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
+
+  @@index([deviceId])
+  @@index([userId])
+  @@map("cookie_consent_logs")
+}

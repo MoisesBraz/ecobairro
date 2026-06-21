@@ -1,0 +1,10 @@
+# Package manager lockfiles — never format these
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# Generated files
+apps/web/src/routeTree.gen.ts
+dist/
+build/
+node_modules/

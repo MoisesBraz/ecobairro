@@ -1,0 +1,162 @@
+name: ecobairro-prod
+
+services:
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile.prod
+      args:
+        - VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID}
+    restart: always
+    environment:
+      NODE_ENV: production
+    networks:
+      - ecobairro-network
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile.prod
+    restart: always
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_ACCESS_TTL_MINUTES: ${JWT_ACCESS_TTL_MINUTES:-15}
+      REFRESH_TOKEN_TTL_DAYS: ${REFRESH_TOKEN_TTL_DAYS:-7}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+      PASSWORD_RESET_TTL_MINUTES: ${PASSWORD_RESET_TTL_MINUTES:-30}
+      APP_BASE_URL: ${APP_BASE_URL}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@ecobairro.local}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ecobairro-network
+
+  analytics:
+    build:
+      context: ../..
+      dockerfile: apps/analytics/Dockerfile
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      # OSRM para o cálculo de rotas (OP4). Default = demo público OSM; idealmente
+      # apontar para um OSRM self-hosted (perfil driving, extract de Portugal).
+      OSRM_BASE_URL: ${OSRM_BASE_URL:-https://router.project-osrm.org}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ecobairro-network
+
+  postgres:
+    image: postgis/postgis:16-3.4
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-prod-data:/var/lib/postgresql/data
+    networks:
+      - ecobairro-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    networks:
+      - ecobairro-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: always
+    environment:
+      - FORCE_RESTART=4
+    depends_on:
+      web:
+        condition: service_started
+      api:
+        condition: service_started
+      analytics:
+        condition: service_started
+      tileserver:
+        condition: service_started
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - ecobairro-network
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: always
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - nginx
+    networks:
+      - ecobairro-network
+
+  tileserver:
+    image: maptiler/tileserver-gl:latest
+    restart: always
+    depends_on:
+      osm-updater:
+        condition: service_started
+    volumes:
+      - osm-prod-data:/data
+    networks:
+      - ecobairro-network
+    command: >
+      --mbtiles /data/portugal.mbtiles
+      --public_url https://ecobairrodigital.pt/tiles
+
+  osm-updater:
+    build:
+      context: ../../apps/tileserver/updater
+      dockerfile: Dockerfile
+    restart: always
+    volumes:
+      - osm-prod-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - DATA_DIR=/data
+      - CRON_INTERVAL_HOURS=24
+      - OSM_VOLUME_NAME=ecobairro-prod_osm-prod-data
+    networks:
+      - ecobairro-network
+    command: ["tsx", "src/index.ts"]
+
+
+networks:
+  ecobairro-network:
+    name: ecobairro-prod-network
+
+volumes:
+  postgres-prod-data:
+  osm-prod-data:

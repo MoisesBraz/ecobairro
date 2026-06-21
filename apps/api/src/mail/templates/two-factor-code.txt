@@ -1,0 +1,12 @@
+Código de verificação 2FA
+
+Use o seguinte código para concluir o login na sua conta ecoBairro:
+
+    {{code}}
+
+O código expira em {{expiresMinutes}} minutos.
+
+Se não foi você que pediu este código, ignore este email e mude a sua password
+imediatamente.
+
+— ecoBairro

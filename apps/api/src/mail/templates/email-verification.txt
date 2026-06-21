@@ -1,0 +1,8 @@
+Bem-vindo ao ecoBairro
+
+A sua conta foi criada. Confirme o seu email para começar a usar a plataforma:
+{{verifyUrl}}
+
+O link expira em {{expiresHours}} horas.
+
+— ecoBairro

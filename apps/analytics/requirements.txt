@@ -1,0 +1,6 @@
+fastapi==0.136.0
+psycopg[binary,pool]==3.3.3
+uvicorn[standard]==0.45.0
+pyjwt==2.10.1
+redis==5.2.1
+httpx==0.28.1

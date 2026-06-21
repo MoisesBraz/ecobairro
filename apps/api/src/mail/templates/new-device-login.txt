@@ -1,0 +1,14 @@
+Novo dispositivo detectado
+
+Foi efetuado um novo login na sua conta a partir de um dispositivo que não
+tínhamos visto antes.
+
+IP: {{ipAddress}}
+Dispositivo: {{userAgent}}
+Data: {{dateTime}}
+
+Foi você? Pode ignorar este email.
+Se não foi você, mude a sua password imediatamente e termine todas as sessões
+ativas na secção "Segurança" da sua conta.
+
+— ecoBairro

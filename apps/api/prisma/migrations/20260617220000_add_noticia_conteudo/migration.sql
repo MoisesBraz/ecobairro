@@ -1,0 +1,1 @@
+ALTER TABLE "noticias" ADD COLUMN "conteudo" TEXT NOT NULL DEFAULT '';
