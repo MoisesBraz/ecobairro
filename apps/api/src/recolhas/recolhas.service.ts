@@ -1,8 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
-import type { RecolhaRecord, UserRole } from '@ecobairro/contracts';
+import type { RecolhaRecord, RecolhaStatus, UserRole } from '@ecobairro/contracts';
+import { badRequest, conflict, forbidden, notFound } from '../common/errors';
 import type { CreateRecolhaDto } from './dto/create-recolha.dto';
 import type { ListRecolhasDto } from './dto/list-recolhas.dto';
+import type { UpdateRecolhaStatusDto } from './dto/update-recolha-status.dto';
 
 function mapRow(r: {
   id: string;
@@ -92,5 +95,87 @@ export class RecolhasService {
       },
     });
     return mapRow(row);
+  }
+
+  async cancel(userId: string, role: UserRole, id: string): Promise<RecolhaRecord> {
+    if (role !== 'CIDADAO') throw forbidden('FORBIDDEN');
+
+    const current = await this.prisma.recolha.findUnique({
+      where: { id },
+      select: { userId: true, status: true },
+    });
+    if (!current || current.userId !== userId) throw notFound('NOT_FOUND');
+    if (current.status !== 'pendente') {
+      throw conflict('CONFLICT', 'Só pode cancelar pedidos pendentes.');
+    }
+
+    const result = await this.prisma.recolha.updateMany({
+      where: { id, userId, status: 'pendente' },
+      data: { status: 'cancelado' },
+    });
+    if (result.count === 0) {
+      throw conflict('CONFLICT', 'O pedido já não está pendente.');
+    }
+
+    const updated = await this.prisma.recolha.findUnique({ where: { id } });
+    if (!updated) throw notFound('NOT_FOUND');
+    return mapRow(updated);
+  }
+
+  /**
+   * Atualiza o estado de uma recolha (triagem/agendamento). Só staff
+   * (operador/gestor/admin) — o cidadão apenas cria e consulta as suas.
+   * Transições válidas: pendente→agendado, pendente→concluido, agendado→concluido.
+   */
+  async updateStatus(
+    role: UserRole,
+    id: string,
+    dto: UpdateRecolhaStatusDto,
+  ): Promise<RecolhaRecord> {
+    assertStaff(role);
+    const current = await this.prisma.recolha.findUnique({
+      where: { id },
+      select: { status: true },
+    });
+    if (!current) throw notFound('NOT_FOUND');
+    validateTransition(current.status as RecolhaStatus, dto.status);
+    try {
+      const row = await this.prisma.recolha.update({
+        where: { id },
+        data: {
+          status: dto.status,
+          ...(dto.data_prevista !== undefined
+            ? { dataPrevista: dto.data_prevista }
+            : {}),
+        },
+      });
+      return mapRow(row);
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
+        throw notFound('NOT_FOUND');
+      }
+      throw e;
+    }
+  }
+}
+
+function assertStaff(role: UserRole): void {
+  if (role !== 'OPERADOR' && role !== 'GESTOR' && role !== 'ADMIN') {
+    throw forbidden('FORBIDDEN');
+  }
+}
+
+const VALID_TRANSITIONS: Partial<Record<RecolhaStatus, RecolhaStatus[]>> = {
+  pendente: ['agendado', 'concluido'],
+  agendado: ['concluido'],
+};
+
+function validateTransition(from: RecolhaStatus, to: RecolhaStatus): void {
+  const allowed = VALID_TRANSITIONS[from] ?? [];
+  if (!(allowed as string[]).includes(to)) {
+    throw badRequest(
+      'VALIDATION_ERROR',
+      `Transição de '${from}' para '${to}' não é permitida.`,
+    );
   }
 }

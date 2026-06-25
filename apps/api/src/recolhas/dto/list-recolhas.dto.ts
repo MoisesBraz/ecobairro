@@ -3,7 +3,7 @@ import { Type } from 'class-transformer';
 
 export class ListRecolhasDto {
   @IsOptional()
-  @IsIn(['pendente', 'agendado', 'concluido'])
+  @IsIn(['pendente', 'agendado', 'concluido', 'cancelado'])
   status?: string;
 
   @IsOptional()

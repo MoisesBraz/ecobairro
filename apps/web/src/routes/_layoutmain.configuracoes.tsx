@@ -324,6 +324,8 @@ function SecuritySection() {
   const [showLogs, setShowLogs] = useState(false)
 
   const [revokeError, setRevokeError] = useState<string | null>(null)
+  const SESSIONS_PAGE_SIZE = 3
+  const [sessionsVisible, setSessionsVisible] = useState(SESSIONS_PAGE_SIZE)
 
   // Carregar status 2FA e sessões
   useEffect(() => {
@@ -456,15 +458,30 @@ function SecuritySection() {
           <div className="flex items-center gap-2">
             <KeyRound className="w-4 h-4 text-muted-foreground" />
             <p className="text-sm font-medium">Sessões ativas</p>
+            {!sessionsLoading && sessions.length > 0 && (
+              <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
+                {sessions.length}
+              </span>
+            )}
           </div>
-          {sessions.length > 0 && (
+          <div className="flex items-center gap-3">
             <button
-              onClick={() => void handleRevokeAll()}
-              className="text-xs text-destructive hover:underline"
+              onClick={loadSessions}
+              disabled={sessionsLoading}
+              aria-label="Atualizar sessões"
+              className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
             >
-              Terminar todas
+              <RefreshCw className={`w-3.5 h-3.5 ${sessionsLoading ? 'animate-spin' : ''}`} />
             </button>
-          )}
+            {sessions.length > 0 && (
+              <button
+                onClick={() => void handleRevokeAll()}
+                className="text-xs text-destructive hover:underline"
+              >
+                Terminar todas
+              </button>
+            )}
+          </div>
         </div>
 
         {revokeError && (
@@ -472,9 +489,10 @@ function SecuritySection() {
         )}
 
         {sessionsLoading ? (
-          <div className="flex items-center gap-2 text-muted-foreground py-2">
-            <Loader className="w-3.5 h-3.5 animate-spin" />
-            <span className="text-xs">A carregar sessões…</span>
+          <div className="flex flex-col gap-2">
+            {[1, 2].map(i => (
+              <div key={i} className="h-14 rounded-xl bg-muted/50 animate-pulse" />
+            ))}
           </div>
         ) : sessionsError ? (
           <p className="text-xs text-destructive">{sessionsError}</p>
@@ -482,7 +500,7 @@ function SecuritySection() {
           <p className="text-xs text-muted-foreground py-1">Sem sessões ativas.</p>
         ) : (
           <div className="flex flex-col gap-2">
-            {sessions.map(s => (
+            {sessions.slice(0, sessionsVisible).map(s => (
               <div key={s.id} className="flex items-center justify-between p-3 rounded-xl bg-muted/50 border border-border/40">
                 <div className="flex items-center gap-3">
                   <div className="w-7 h-7 rounded-lg bg-background flex items-center justify-center border border-border/60">
@@ -509,6 +527,24 @@ function SecuritySection() {
                 </button>
               </div>
             ))}
+
+            {/* Mostrar mais / menos */}
+            {sessions.length > SESSIONS_PAGE_SIZE && (
+              <button
+                onClick={() =>
+                  setSessionsVisible(v =>
+                    v >= sessions.length ? SESSIONS_PAGE_SIZE : Math.min(v + SESSIONS_PAGE_SIZE, sessions.length)
+                  )
+                }
+                className="text-xs text-[var(--primary)] hover:underline flex items-center gap-1 pt-1 self-start"
+              >
+                <ChevronRight className={`w-3 h-3 transition-transform ${sessionsVisible >= sessions.length ? 'rotate-90' : ''}`} />
+                {sessionsVisible >= sessions.length
+                  ? 'Ver menos'
+                  : `Ver mais (${sessions.length - sessionsVisible} restante${sessions.length - sessionsVisible !== 1 ? 's' : ''})`
+                }
+              </button>
+            )}
           </div>
         )}
       </div>

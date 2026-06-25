@@ -1,8 +1,12 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Inject,
+  Param,
+  ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -13,6 +17,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { RecolhasService } from './recolhas.service';
 import { ListRecolhasDto } from './dto/list-recolhas.dto';
 import { CreateRecolhaDto } from './dto/create-recolha.dto';
+import { UpdateRecolhaStatusDto } from './dto/update-recolha-status.dto';
 
 @Controller('recolhas')
 @UseGuards(JwtAuthGuard)
@@ -32,10 +37,30 @@ export class RecolhasController {
   }
 
   @Post()
-  create(
+  async create(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateRecolhaDto,
   ) {
-    return this.recolhasService.create(user.userId, dto);
+    const recolha = await this.recolhasService.create(user.userId, dto);
+    return { recolha };
+  }
+
+  @Delete(':id')
+  async cancel(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    const recolha = await this.recolhasService.cancel(user.userId, user.role, id);
+    return { recolha };
+  }
+
+  @Patch(':id')
+  async updateStatus(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: UpdateRecolhaStatusDto,
+  ) {
+    const recolha = await this.recolhasService.updateStatus(user.role, id, dto);
+    return { recolha };
   }
 }

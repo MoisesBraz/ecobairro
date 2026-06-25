@@ -10,6 +10,7 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
   return {
     ...actual,
     useNavigate: () => mockNavigate,
+    useSearch: () => ({ ecoponto: undefined }),
     Link: ({ children, to }: { children: React.ReactNode; to: string }) => <a href={to}>{children}</a>,
     createFileRoute: () => (config: any) => ({
       component: config.component,
@@ -46,6 +47,8 @@ vi.mock('react-map-gl/maplibre', () => {
     Popup: () => <div data-testid="mock-popup" />,
     NavigationControl: () => <div data-testid="mock-nav" />,
     FullscreenControl: () => <div data-testid="mock-fs" />,
+    Source: ({ children }: any) => <div data-testid="mock-source">{children}</div>,
+    Layer: () => <div data-testid="mock-layer" />,
   }
 })
 

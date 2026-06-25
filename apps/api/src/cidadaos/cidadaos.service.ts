@@ -63,7 +63,7 @@ export class CidadaosService {
     assertCitizen(role);
     const rows = await this.prisma.cidadaoEcopontoFavorito.findMany({
       where: { userId, ecoponto: { ativo: true } },
-      include: { ecoponto: true },
+      include: { ecoponto: { include: { contentores: true } } },
       orderBy: { criadoEm: 'asc' },
     });
     return {
@@ -145,14 +145,22 @@ function mapEcopontoFavorito(e: {
   id: string;
   nome: string;
   distanciaLabel: string;
-  ocupacao: number;
+  lat: number;
+  lng: number;
   mapTileUrl: string | null;
+  contentores?: { ocupacao: number }[];
 }): HomeEcoponto {
+  const ocupacao = e.contentores && e.contentores.length > 0 
+    ? Math.max(...e.contentores.map((c) => c.ocupacao)) 
+    : 0;
+
   return {
     id: e.id,
     nome: e.nome,
     distancia: e.distanciaLabel,
-    ocupacao: e.ocupacao,
+    ocupacao,
+    lat: e.lat,
+    lng: e.lng,
     map_url: e.mapTileUrl ?? '',
   };
 }

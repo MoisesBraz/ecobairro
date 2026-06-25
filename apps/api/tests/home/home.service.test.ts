@@ -7,7 +7,7 @@ const ecoRow = {
   id: 'e1',
   nome: 'Eco A',
   distanciaLabel: '100 m',
-  ocupacao: 85,
+  contentores: [{ tipo: 'Papel', ocupacao: 85, sensorEstado: 'online' }],
   mapTileUrl: 'https://example.com/t.png',
   ordem: 0,
   ativo: true,

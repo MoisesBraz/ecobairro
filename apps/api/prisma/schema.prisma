@@ -23,6 +23,7 @@ enum ReportStatus {
   ANALISE
   RESOLVIDO
   REJEITADO
+  CANCELADO
 }
 
 enum TwoFactorType {
@@ -163,10 +164,6 @@ model Ecoponto {
   codigoPostal      String?  @map("codigo_postal")
   zona              String?
   distanciaLabel    String   @default("") @map("distancia_label")
-  ocupacao          Int
-  tipos             Json     @default("[]")
-  sensorEstado      String   @default("online") @map("sensor_estado")
-  ultimaRecolha     String?  @map("ultima_recolha")
   ultimaAtualizacao String?  @map("ultima_atualizacao")
   lat               Float    @default(40.6409)
   lng               Float    @default(-8.6537)
@@ -175,15 +172,30 @@ model Ecoponto {
   // Prisma a reconhecer (sem drift); a geometria e o índice GiST são geridos via SQL.
   geom              Unsupported("geometry(Point, 4326)")?
   mapTileUrl        String?  @map("map_tile_url")
-  bateria           Int?
   temperatura       Float?
   ordem             Int      @default(0)
   ativo             Boolean  @default(true)
   criadoEm          DateTime @default(now()) @map("criado_em") @db.Timestamptz(6)
 
-  favoritos CidadaoEcopontoFavorito[]
+  favoritos   CidadaoEcopontoFavorito[]
+  contentores Contentor[]
 
   @@map("ecopontos")
+}
+
+model Contentor {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ecopontoId    String   @map("ecoponto_id") @db.Uuid
+  tipo          String
+  ocupacao      Int      @default(0)
+  sensorEstado  String   @default("online") @map("sensor_estado")
+  bateria       Int?
+  ultimaRecolha String?  @map("ultima_recolha")
+
+  ecoponto Ecoponto @relation(fields: [ecopontoId], references: [id], onDelete: Cascade)
+
+  @@index([ecopontoId])
+  @@map("contentores")
 }
 
 model CidadaoEcopontoFavorito {

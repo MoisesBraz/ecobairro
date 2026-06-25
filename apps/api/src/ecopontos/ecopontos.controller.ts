@@ -93,8 +93,7 @@ export class EcopontosController {
   ): Promise<EcopontoRecord> {
     return this.svc.create(user.role, {
       ...body,
-      sensor_estado: body.sensor_estado as EcopontoSensor | undefined,
-    });
+    } as any);
   }
 
   @Patch(':id')
@@ -106,8 +105,7 @@ export class EcopontosController {
   ): Promise<EcopontoRecord> {
     return this.svc.update(user.role, id, {
       ...body,
-      sensor_estado: body.sensor_estado as EcopontoSensor | undefined,
-    });
+    } as any);
   }
 
   /** Soft-delete: marca ativo=false. */

@@ -173,6 +173,28 @@ export class RotasService {
     }
   }
 
+  /**
+   * Elimina uma rota (só gestor/admin). Hard delete — não há histórico operacional
+   * a preservar como nos utilizadores.
+   */
+  async remove(
+    id: string,
+    user: { userId: string; role: ContractUserRole },
+  ): Promise<void> {
+    this.assertManager(user.role);
+    try {
+      await this.prisma.rota.delete({ where: { id } });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2025'
+      ) {
+        throw notFound('NOT_FOUND');
+      }
+      throw err;
+    }
+  }
+
   /** Filtro Prisma de rotas visíveis para o utilizador (operador = só as suas). */
   private async scopeForUser(user: {
     userId: string;

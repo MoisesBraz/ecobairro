@@ -32,6 +32,7 @@ import { Route as LayoutmainPartilhasRouteImport } from './routes/_layoutmain.pa
 import { Route as LayoutmainNoticiasRouteImport } from './routes/_layoutmain.noticias'
 import { Route as LayoutmainMapaSensoresRouteImport } from './routes/_layoutmain.mapa-sensores'
 import { Route as LayoutmainMapaRouteImport } from './routes/_layoutmain.mapa'
+import { Route as LayoutmainKpisRouteImport } from './routes/_layoutmain.kpis'
 import { Route as LayoutmainGestaoQuizRouteImport } from './routes/_layoutmain.gestao-quiz'
 import { Route as LayoutmainFilaRouteImport } from './routes/_layoutmain.fila'
 import { Route as LayoutmainEquipasRouteImport } from './routes/_layoutmain.equipas'
@@ -40,7 +41,6 @@ import { Route as LayoutmainDashboardRouteImport } from './routes/_layoutmain.da
 import { Route as LayoutmainConfiguracoesRouteImport } from './routes/_layoutmain.configuracoes'
 import { Route as LayoutmainCampanhasRouteImport } from './routes/_layoutmain.campanhas'
 import { Route as LayoutmainAuditRouteImport } from './routes/_layoutmain.audit'
-import { Route as LayoutmainAnalyticsRouteImport } from './routes/_layoutmain.analytics'
 import { Route as LayoutmainAdminRouteImport } from './routes/_layoutmain.admin'
 import { Route as LayoutpublicNoticiaIdRouteImport } from './routes/_layoutpublic.noticia.$id'
 
@@ -158,6 +158,11 @@ const LayoutmainMapaRoute = LayoutmainMapaRouteImport.update({
   path: '/mapa',
   getParentRoute: () => LayoutmainRoute,
 } as any)
+const LayoutmainKpisRoute = LayoutmainKpisRouteImport.update({
+  id: '/kpis',
+  path: '/kpis',
+  getParentRoute: () => LayoutmainRoute,
+} as any)
 const LayoutmainGestaoQuizRoute = LayoutmainGestaoQuizRouteImport.update({
   id: '/gestao-quiz',
   path: '/gestao-quiz',
@@ -198,11 +203,6 @@ const LayoutmainAuditRoute = LayoutmainAuditRouteImport.update({
   path: '/audit',
   getParentRoute: () => LayoutmainRoute,
 } as any)
-const LayoutmainAnalyticsRoute = LayoutmainAnalyticsRouteImport.update({
-  id: '/analytics',
-  path: '/analytics',
-  getParentRoute: () => LayoutmainRoute,
-} as any)
 const LayoutmainAdminRoute = LayoutmainAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -222,7 +222,6 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/verify-email': typeof VerifyEmailRoute
   '/admin': typeof LayoutmainAdminRoute
-  '/analytics': typeof LayoutmainAnalyticsRoute
   '/audit': typeof LayoutmainAuditRoute
   '/campanhas': typeof LayoutmainCampanhasRoute
   '/configuracoes': typeof LayoutmainConfiguracoesRoute
@@ -231,6 +230,7 @@ export interface FileRoutesByFullPath {
   '/equipas': typeof LayoutmainEquipasRoute
   '/fila': typeof LayoutmainFilaRoute
   '/gestao-quiz': typeof LayoutmainGestaoQuizRoute
+  '/kpis': typeof LayoutmainKpisRoute
   '/mapa': typeof LayoutmainMapaRoute
   '/mapa-sensores': typeof LayoutmainMapaSensoresRoute
   '/noticias': typeof LayoutmainNoticiasRoute
@@ -256,7 +256,6 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/verify-email': typeof VerifyEmailRoute
   '/admin': typeof LayoutmainAdminRoute
-  '/analytics': typeof LayoutmainAnalyticsRoute
   '/audit': typeof LayoutmainAuditRoute
   '/campanhas': typeof LayoutmainCampanhasRoute
   '/configuracoes': typeof LayoutmainConfiguracoesRoute
@@ -265,6 +264,7 @@ export interface FileRoutesByTo {
   '/equipas': typeof LayoutmainEquipasRoute
   '/fila': typeof LayoutmainFilaRoute
   '/gestao-quiz': typeof LayoutmainGestaoQuizRoute
+  '/kpis': typeof LayoutmainKpisRoute
   '/mapa': typeof LayoutmainMapaRoute
   '/mapa-sensores': typeof LayoutmainMapaSensoresRoute
   '/noticias': typeof LayoutmainNoticiasRoute
@@ -293,7 +293,6 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/verify-email': typeof VerifyEmailRoute
   '/_layoutmain/admin': typeof LayoutmainAdminRoute
-  '/_layoutmain/analytics': typeof LayoutmainAnalyticsRoute
   '/_layoutmain/audit': typeof LayoutmainAuditRoute
   '/_layoutmain/campanhas': typeof LayoutmainCampanhasRoute
   '/_layoutmain/configuracoes': typeof LayoutmainConfiguracoesRoute
@@ -302,6 +301,7 @@ export interface FileRoutesById {
   '/_layoutmain/equipas': typeof LayoutmainEquipasRoute
   '/_layoutmain/fila': typeof LayoutmainFilaRoute
   '/_layoutmain/gestao-quiz': typeof LayoutmainGestaoQuizRoute
+  '/_layoutmain/kpis': typeof LayoutmainKpisRoute
   '/_layoutmain/mapa': typeof LayoutmainMapaRoute
   '/_layoutmain/mapa-sensores': typeof LayoutmainMapaSensoresRoute
   '/_layoutmain/noticias': typeof LayoutmainNoticiasRoute
@@ -329,7 +329,6 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/verify-email'
     | '/admin'
-    | '/analytics'
     | '/audit'
     | '/campanhas'
     | '/configuracoes'
@@ -338,6 +337,7 @@ export interface FileRouteTypes {
     | '/equipas'
     | '/fila'
     | '/gestao-quiz'
+    | '/kpis'
     | '/mapa'
     | '/mapa-sensores'
     | '/noticias'
@@ -363,7 +363,6 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/verify-email'
     | '/admin'
-    | '/analytics'
     | '/audit'
     | '/campanhas'
     | '/configuracoes'
@@ -372,6 +371,7 @@ export interface FileRouteTypes {
     | '/equipas'
     | '/fila'
     | '/gestao-quiz'
+    | '/kpis'
     | '/mapa'
     | '/mapa-sensores'
     | '/noticias'
@@ -399,7 +399,6 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/verify-email'
     | '/_layoutmain/admin'
-    | '/_layoutmain/analytics'
     | '/_layoutmain/audit'
     | '/_layoutmain/campanhas'
     | '/_layoutmain/configuracoes'
@@ -408,6 +407,7 @@ export interface FileRouteTypes {
     | '/_layoutmain/equipas'
     | '/_layoutmain/fila'
     | '/_layoutmain/gestao-quiz'
+    | '/_layoutmain/kpis'
     | '/_layoutmain/mapa'
     | '/_layoutmain/mapa-sensores'
     | '/_layoutmain/noticias'
@@ -600,6 +600,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutmainMapaRouteImport
       parentRoute: typeof LayoutmainRoute
     }
+    '/_layoutmain/kpis': {
+      id: '/_layoutmain/kpis'
+      path: '/kpis'
+      fullPath: '/kpis'
+      preLoaderRoute: typeof LayoutmainKpisRouteImport
+      parentRoute: typeof LayoutmainRoute
+    }
     '/_layoutmain/gestao-quiz': {
       id: '/_layoutmain/gestao-quiz'
       path: '/gestao-quiz'
@@ -656,13 +663,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutmainAuditRouteImport
       parentRoute: typeof LayoutmainRoute
     }
-    '/_layoutmain/analytics': {
-      id: '/_layoutmain/analytics'
-      path: '/analytics'
-      fullPath: '/analytics'
-      preLoaderRoute: typeof LayoutmainAnalyticsRouteImport
-      parentRoute: typeof LayoutmainRoute
-    }
     '/_layoutmain/admin': {
       id: '/_layoutmain/admin'
       path: '/admin'
@@ -682,7 +682,6 @@ declare module '@tanstack/react-router' {
 
 interface LayoutmainRouteChildren {
   LayoutmainAdminRoute: typeof LayoutmainAdminRoute
-  LayoutmainAnalyticsRoute: typeof LayoutmainAnalyticsRoute
   LayoutmainAuditRoute: typeof LayoutmainAuditRoute
   LayoutmainCampanhasRoute: typeof LayoutmainCampanhasRoute
   LayoutmainConfiguracoesRoute: typeof LayoutmainConfiguracoesRoute
@@ -691,6 +690,7 @@ interface LayoutmainRouteChildren {
   LayoutmainEquipasRoute: typeof LayoutmainEquipasRoute
   LayoutmainFilaRoute: typeof LayoutmainFilaRoute
   LayoutmainGestaoQuizRoute: typeof LayoutmainGestaoQuizRoute
+  LayoutmainKpisRoute: typeof LayoutmainKpisRoute
   LayoutmainMapaRoute: typeof LayoutmainMapaRoute
   LayoutmainMapaSensoresRoute: typeof LayoutmainMapaSensoresRoute
   LayoutmainNoticiasRoute: typeof LayoutmainNoticiasRoute
@@ -706,7 +706,6 @@ interface LayoutmainRouteChildren {
 
 const LayoutmainRouteChildren: LayoutmainRouteChildren = {
   LayoutmainAdminRoute: LayoutmainAdminRoute,
-  LayoutmainAnalyticsRoute: LayoutmainAnalyticsRoute,
   LayoutmainAuditRoute: LayoutmainAuditRoute,
   LayoutmainCampanhasRoute: LayoutmainCampanhasRoute,
   LayoutmainConfiguracoesRoute: LayoutmainConfiguracoesRoute,
@@ -715,6 +714,7 @@ const LayoutmainRouteChildren: LayoutmainRouteChildren = {
   LayoutmainEquipasRoute: LayoutmainEquipasRoute,
   LayoutmainFilaRoute: LayoutmainFilaRoute,
   LayoutmainGestaoQuizRoute: LayoutmainGestaoQuizRoute,
+  LayoutmainKpisRoute: LayoutmainKpisRoute,
   LayoutmainMapaRoute: LayoutmainMapaRoute,
   LayoutmainMapaSensoresRoute: LayoutmainMapaSensoresRoute,
   LayoutmainNoticiasRoute: LayoutmainNoticiasRoute,

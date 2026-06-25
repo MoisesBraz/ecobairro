@@ -48,6 +48,17 @@ function IsCoordPairArray(validationOptions?: ValidationOptions) {
   };
 }
 
+class RotaContentorDto {
+  @IsString()
+  @MaxLength(60)
+  tipo!: string;
+
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  ocupacao!: number;
+}
+
 class RotaParagemDto implements RotaParagem {
   @IsUUID()
   id!: string;
@@ -75,6 +86,14 @@ class RotaParagemDto implements RotaParagem {
   @IsInt()
   @Min(1)
   ordem!: number;
+
+  // Contentores da paragem (vêm do analytics). Opcional: rotas de seed não têm.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => RotaContentorDto)
+  contentores?: { tipo: string; ocupacao: number }[];
 }
 
 export class CreateRotaDto implements CreateRotaRequest {

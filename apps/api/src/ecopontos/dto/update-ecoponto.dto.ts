@@ -1,5 +1,35 @@
 import { IsArray, IsBoolean, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 
+import { Type } from 'class-transformer';
+
+export class UpdateContentorDto {
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @IsOptional()
+  @IsString()
+  tipo?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  ocupacao?: number;
+
+  @IsOptional()
+  @IsString()
+  sensor_estado?: string;
+
+  @IsOptional()
+  @IsNumber()
+  bateria?: number;
+
+  @IsOptional()
+  @IsString()
+  ultima_recolha?: string;
+}
+
 export class UpdateEcopontoDto {
   @IsOptional()
   @IsString()
@@ -14,23 +44,13 @@ export class UpdateEcopontoDto {
   morada?: string;
 
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(100)
-  ocupacao?: number;
+  @IsString()
+  zona?: string;
 
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
-  tipos?: string[];
-
-  @IsOptional()
-  @IsString()
-  sensor_estado?: string;
-
-  @IsOptional()
-  @IsString()
-  ultima_recolha?: string;
+  @Type(() => UpdateContentorDto)
+  contentores?: UpdateContentorDto[];
 
   @IsOptional()
   @IsNumber()
@@ -39,6 +59,10 @@ export class UpdateEcopontoDto {
   @IsOptional()
   @IsNumber()
   lng?: number;
+
+  @IsOptional()
+  @IsNumber()
+  temperatura?: number;
 
   @IsOptional()
   @IsBoolean()

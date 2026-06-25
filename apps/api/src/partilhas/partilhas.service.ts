@@ -3,20 +3,28 @@ import { Prisma } from '@prisma/client';
 import type {
   CreatePartilhaRequest,
   CreatePartilhaResponse,
+  ExpressPartilhaInterestRequest,
+  ExpressPartilhaInterestResponse,
   ListPartilhasQuery,
   ListPartilhasResponse,
   PartilhaRecord,
   UserRole,
 } from '@ecobairro/contracts';
 import { PrismaService } from '../database/prisma.service';
-import { forbidden } from '../common/errors';
+import { MailService } from '../mail/mail.service';
+import { badRequest, forbidden, notFound, serviceUnavailable } from '../common/errors';
 
 @Injectable()
 export class PartilhasService {
   private readonly prisma: PrismaService;
+  private readonly mail: MailService;
 
-  constructor(@Inject(PrismaService) prisma: PrismaService) {
+  constructor(
+    @Inject(PrismaService) prisma: PrismaService,
+    @Inject(MailService) mail: MailService,
+  ) {
     this.prisma = prisma;
+    this.mail = mail;
   }
 
   async list(query: ListPartilhasQuery): Promise<ListPartilhasResponse> {
@@ -81,6 +89,76 @@ export class PartilhasService {
     });
 
     return { partilha: mapRow(row) };
+  }
+
+  /**
+   * Manifesta interesse numa partilha. Não expõe contactos na UI: notifica o
+   * autor por email com o nome e email de quem demonstrou interesse (e uma
+   * mensagem opcional), para o autor combinar a entrega. O interessado consente
+   * partilhar o seu próprio contacto ao carregar no botão.
+   */
+  async expressInterest(
+    interessadoId: string,
+    partilhaId: string,
+    input: ExpressPartilhaInterestRequest,
+  ): Promise<ExpressPartilhaInterestResponse> {
+    const partilha = await this.prisma.partilha.findUnique({
+      where: { id: partilhaId },
+      select: { id: true, titulo: true, zona: true, userId: true },
+    });
+    if (!partilha) throw notFound('NOT_FOUND');
+
+    // Não faz sentido manifestar interesse na própria partilha.
+    if (partilha.userId && partilha.userId === interessadoId) {
+      throw badRequest('VALIDATION_ERROR', 'Não pode manifestar interesse na sua própria partilha.');
+    }
+
+    // Autor anonimizado/removido (userId nulo) — não há a quem notificar.
+    if (!partilha.userId) {
+      throw serviceUnavailable(
+        'SERVICE_UNAVAILABLE',
+        'Não é possível contactar o autor desta partilha.',
+      );
+    }
+
+    const [autor, interessado, interessadoPerfil] = await Promise.all([
+      this.prisma.user.findUnique({ where: { id: partilha.userId }, select: { email: true } }),
+      this.prisma.user.findUnique({ where: { id: interessadoId }, select: { email: true } }),
+      this.prisma.cidadaoPerfil.findUnique({
+        where: { userId: interessadoId },
+        select: { nomeCompleto: true },
+      }),
+    ]);
+
+    if (!autor?.email) {
+      throw serviceUnavailable(
+        'SERVICE_UNAVAILABLE',
+        'Não é possível contactar o autor desta partilha.',
+      );
+    }
+
+    const interessadoNome = interessadoPerfil?.nomeCompleto ?? interessado?.email ?? 'Um cidadão';
+    if (!interessado?.email) {
+      throw serviceUnavailable(
+        'SERVICE_UNAVAILABLE',
+        'Não foi possível obter os dados de contacto.',
+      );
+    }
+    const interessadoEmail = interessado.email;
+
+    await this.mail.send('partilha-interesse', {
+      to: autor.email,
+      subject: `Alguém tem interesse na sua partilha "${partilha.titulo}"`,
+      variables: {
+        tituloPartilha: partilha.titulo,
+        zona: partilha.zona,
+        interessadoNome,
+        interessadoEmail,
+        mensagem: input.mensagem?.trim() || '(sem mensagem)',
+      },
+    });
+
+    return { notificado: true };
   }
 }
 

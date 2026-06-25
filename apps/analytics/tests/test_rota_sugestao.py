@@ -100,6 +100,9 @@ def test_rota_uses_osrm_order_when_available(client, monkeypatch):
     assert body["distancia_label"] == "1.2 km"
     assert body["duracao_label"] == "10 min"
     assert body["geometria"] == [[40.64, -8.65], [40.65, -8.65]]
+    for p in body["paragens"]:
+        assert "contentores" in p
+        assert isinstance(p["contentores"], list)
 
 
 @pytest.mark.integration
@@ -124,10 +127,16 @@ def test_rota_filters_by_limiar_and_zona(client, monkeypatch):
     monkeypatch.setattr(
         "app.routers.operacional.osrm_trip", lambda *a, **k: None
     )
-    # zona=Centro, limiar default 60 → só Perto (90/alerta); Medio (40/online) fica fora.
+    # zona=Centro, limiar default 60 → só Perto; Medio (40/online) fica fora.
+    # Perto tem 2 contentores (90 e 30): conta o MAX (90 ≥ 60), o contentor a 30 não o exclui.
     body = client.get(
         "/operacional/rota-sugestao",
         params={"zona": "Centro"},
         headers=_auth("ADMIN"),
     ).json()
     assert [p["nome"] for p in body["paragens"]] == ["Perto"]
+    assert body["paragens"][0]["ocupacao"] == 90
+    contentores = body["paragens"][0]["contentores"]
+    assert isinstance(contentores, list) and len(contentores) == 2
+    ocupacoes = {c["ocupacao"] for c in contentores}
+    assert ocupacoes == {90, 30}

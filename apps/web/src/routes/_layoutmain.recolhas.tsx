@@ -1,11 +1,11 @@
 import { createFileRoute, useSearch } from '@tanstack/react-router'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import {
   Truck, PlusCircle, Clock, Calendar, CheckCircle,
   ChevronRight, Info, MapPin, Package, AlertTriangle,
-  Loader2, X, Camera, ImageIcon, ArrowLeft, Send
+  Loader2, X, XCircle, Camera, ImageIcon, ArrowLeft, Send,
+  Layers, ChevronDown, Filter, Upload
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useModalA11y } from '@/lib/use-modal-a11y'
@@ -16,7 +16,10 @@ import { fetchJson, HttpError } from '@/lib/http/fetch-json'
 import { getApiErrorMessage } from '@/lib/http/api-error'
 import { clientEnv } from '@/lib/env'
 import { getAccessToken, getUser } from '@/lib/auth'
-import type { ListRecolhasResponse, RecolhaRecord, CreateRecolhaRequest, CreateRecolhaResponse } from '@ecobairro/contracts'
+import type { ListRecolhasResponse, RecolhaRecord, CreateRecolhaRequest, CreateRecolhaResponse, UpdateRecolhaStatusRequest, UpdateRecolhaResponse, CancelRecolhaResponse, RecolhaStatus } from '@ecobairro/contracts'
+import { LocationPicker, type Coords } from '@/components/reportes/location-picker'
+import { ConfirmationModal } from '@/components/ui/confirmation-modal'
+import { focusFirstInvalidField } from '@/lib/focus-first-invalid-field'
 
 interface RecolhasSearch {
   novo?: '1'
@@ -37,9 +40,10 @@ export const Route = createFileRoute('/_layoutmain/recolhas')({
 })
 
 const statusConfig: Record<string, { label: string; icon: React.ElementType; color: string; bg: string }> = {
-  pendente:  { label: 'Pendente',  icon: Clock,        color: '#fb923c',              bg: 'bg-orange-500/10' },
+  pendente:  { label: 'Pendente',  icon: Clock,        color: '#fbbf24',              bg: 'bg-amber-400/10'  },
   agendado:  { label: 'Agendado',  icon: Calendar,     color: '#60a5fa',              bg: 'bg-blue-500/10'   },
   concluido: { label: 'Concluído', icon: CheckCircle,  color: 'oklch(0.55 0.18 150)', bg: 'bg-green-500/10'  },
+  cancelado: { label: 'Cancelado', icon: XCircle,      color: '#f87171',              bg: 'bg-red-500/10'    },
 }
 
 const tiposRecolha = ['Monos Volumosos', 'Entulho'] as const
@@ -63,7 +67,7 @@ function formatarData(date: string) {
 
 function RecolhasPage() {
   const user = getUser()
-  const isManagementView = user?.role === 'operador'
+  const isManagementView = user?.role === 'operador' || user?.role === 'gestor' || user?.role === 'admin'
   const search = useSearch({ from: '/_layoutmain/recolhas' })
   // page vive na URL (nuqs). Esta lista não tem filtros/pesquisa.
   const { params, setPage, pageSize } = useListQuery({}, POR_PAGINA)
@@ -81,6 +85,16 @@ function RecolhasPage() {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<{ morada?: string; subtipo?: string; data?: string }>({})
   const [forceCreateModal, setForceCreateModal] = useState(false)
+  const [updatingId, setUpdatingId] = useState<string | null>(null)
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
+  const [cancelTargetId, setCancelTargetId] = useState<string | null>(null)
+  const [cancelError, setCancelError] = useState<string | null>(null)
+  const [updateError, setUpdateError] = useState<string | null>(null)
+  const [statusFiltro, setStatusFiltro] = useState<string>('todos')
+  const [infoAberta, setInfoAberta] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const [updateForm, setUpdateForm] = useState<{ status: RecolhaStatus; data_prevista: string }>({ status: 'agendado', data_prevista: '' })
+  const [locationCoords, setLocationCoords] = useState<Coords | null>(null)
   const [form, setForm] = useState({
     tipo: 'Monos Volumosos',
     subtipo: '',
@@ -134,6 +148,7 @@ function RecolhasPage() {
     setSubmitting(false)
     setSubmitError(null)
     setFieldErrors({})
+    setLocationCoords(null)
   }, [])
 
   const abrirModal = useCallback(() => {
@@ -163,9 +178,15 @@ function RecolhasPage() {
       const errs: { morada?: string; subtipo?: string; data?: string } = {}
       if (!form.morada.trim()) errs.morada = 'Indique a localização da recolha.'
       if (!form.subtipo.trim()) errs.subtipo = 'Indique um título para a recolha.'
-      if (!form.data) errs.data = 'Escolha uma data para a recolha.'
+      if (!form.data) {
+        errs.data = 'Escolha uma data para a recolha.'
+      } else if (form.data < new Date().toISOString().split('T')[0]) {
+        errs.data = 'A data selecionada não pode ser no passado.'
+      }
       if (Object.keys(errs).length > 0) {
         setFieldErrors(errs)
+        const firstInvalidField = (['morada', 'subtipo', 'data'] as const).find(field => errs[field])
+        if (firstInvalidField) focusFirstInvalidField(modalRef.current, [firstInvalidField])
         return
       }
     }
@@ -185,17 +206,29 @@ function RecolhasPage() {
 
     const parsed = agendarSchema.safeParse(form)
     if (!parsed.success) {
-      setSubmitError(parsed.error.issues[0]?.message ?? 'Verifique os campos do formulário.')
+      const errs: { morada?: string; subtipo?: string; data?: string } = {}
+      for (const issue of parsed.error.issues) {
+        if (issue.path[0] === 'morada') errs.morada = issue.message
+        if (issue.path[0] === 'subtipo') errs.subtipo = issue.message
+      }
+      setFieldErrors(errs)
+      setPassoAgendamento(1)
+      const firstInvalidField = (['morada', 'subtipo', 'data'] as const).find(field => errs[field])
+      if (firstInvalidField) focusFirstInvalidField(modalRef.current, [firstInvalidField])
       return
     }
 
     setSubmitting(true)
     try {
+      const dataSugerida = formatarData(form.data)
+      const baseObs = parsed.data.obs?.trim()
+      const obsFinal = `Data sugerida: ${dataSugerida}` + (baseObs ? `\n\n${baseObs}` : '')
+
       const body: CreateRecolhaRequest = {
         tipo: parsed.data.tipo,
         subtipo: parsed.data.subtipo.trim(),
         morada: parsed.data.morada.trim(),
-        obs: parsed.data.obs?.trim() || undefined,
+        obs: obsFinal,
       }
       await fetchJson<CreateRecolhaResponse>('/v1/recolhas', {
         baseUrl: clientEnv.apiBaseUrl,
@@ -219,6 +252,51 @@ function RecolhasPage() {
     }
   }
 
+  async function onUpdateStatus(id: string) {
+    setUpdatingId(id)
+    setUpdateError(null)
+    const body: UpdateRecolhaStatusRequest = { status: updateForm.status }
+    if (updateForm.data_prevista) {
+      const [y, m, d] = updateForm.data_prevista.split('-')
+      body.data_prevista = `${d}/${m}/${y}`
+    }
+    try {
+      await fetchJson<UpdateRecolhaResponse>(`/v1/recolhas/${id}`, {
+        baseUrl: clientEnv.apiBaseUrl,
+        headers,
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      })
+      await load()
+      setExpandido(null)
+    } catch (err) {
+      setUpdateError(getApiErrorMessage(err, 'Não foi possível atualizar o estado.'))
+    } finally {
+      setUpdatingId(null)
+    }
+  }
+
+  async function confirmCancel() {
+    if (!cancelTargetId) return
+    const id = cancelTargetId
+    setCancellingId(id)
+    setCancelError(null)
+    try {
+      await fetchJson<CancelRecolhaResponse>(`/v1/recolhas/${id}`, {
+        baseUrl: clientEnv.apiBaseUrl,
+        headers,
+        method: 'DELETE',
+      })
+      await load()
+      setExpandido(null)
+      setCancelTargetId(null)
+    } catch (error) {
+      setCancelError(getApiErrorMessage(error, 'Não foi possível cancelar o pedido.'))
+    } finally {
+      setCancellingId(null)
+    }
+  }
+
   const pageCount = Math.ceil(total / pageSize)
   const progressoAgendamento = enviado ? 100 : (passoAgendamento / 3) * 100
 
@@ -226,6 +304,22 @@ function RecolhasPage() {
     pendente:  recolhas.filter(p => p.status === 'pendente').length,
     agendado:  recolhas.filter(p => p.status === 'agendado').length,
     concluido: recolhas.filter(p => p.status === 'concluido').length,
+    cancelado: recolhas.filter(p => p.status === 'cancelado').length,
+  }
+
+  const recolhasFiltradas = statusFiltro === 'todos'
+    ? recolhas
+    : recolhas.filter(p => p.status === statusFiltro)
+
+
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault()
+    setDragOver(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file && ['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setImagemFile(file)
+    }
   }
 
   return (
@@ -272,7 +366,11 @@ function RecolhasPage() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-foreground">{loading ? '-' : stat.value}</div>
+                {loading ? (
+                  <div className="h-8 w-12 rounded-lg bg-muted animate-pulse" />
+                ) : (
+                  <div className="text-2xl font-bold text-foreground">{stat.value}</div>
+                )}
                 <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{stat.desc}</p>
               </CardContent>
             </Card>
@@ -280,14 +378,18 @@ function RecolhasPage() {
         })}
       </div>
 
-      <section className="space-y-4">
-        <div className="flex items-center gap-2">
-          <Info className="w-4 h-4 text-[var(--primary)]" />
-          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
+      <section className="space-y-3">
+        <button
+          onClick={() => setInfoAberta(v => !v)}
+          className="flex items-center gap-2 w-full text-left group"
+        >
+          <Info className="w-4 h-4 text-[var(--primary)] shrink-0" />
+          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider flex-1">
             {isManagementView ? 'Como funciona a gestão?' : 'O que recolhemos?'}
           </h2>
-        </div>
-        <Card className="border border-border/70 shadow-sm rounded-xl bg-card overflow-hidden">
+          <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${infoAberta ? 'rotate-180' : ''}`} />
+        </button>
+        {infoAberta && <Card className="border border-border/70 shadow-sm rounded-xl bg-card overflow-hidden animate-in fade-in duration-150">
           <CardContent className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
               <div className="flex items-start gap-3">
@@ -335,7 +437,7 @@ function RecolhasPage() {
               </div>
             </div>
           </CardContent>
-        </Card>
+        </Card>}
       </section>
 
       <section className="space-y-4">
@@ -349,21 +451,80 @@ function RecolhasPage() {
           <span className="text-xs text-muted-foreground">{total} pedido{total !== 1 ? 's' : ''}</span>
         </div>
 
+        {/* Filtros por estado */}
+        {!loading && recolhas.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <Filter className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            {(['todos', 'pendente', 'agendado', 'concluido', 'cancelado'] as const).map(s => {
+              const count = s === 'todos' ? recolhas.length : contagens[s as keyof typeof contagens]
+              const cfg = s === 'todos' ? null : statusConfig[s]
+              return (
+                <button
+                  key={s}
+                  onClick={() => setStatusFiltro(s)}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-all flex items-center gap-1 ${
+                    statusFiltro === s
+                      ? 'bg-[var(--primary)] text-white shadow-sm'
+                      : 'bg-card border border-border text-muted-foreground hover:border-[var(--primary)]/40'
+                  }`}
+                >
+                  {cfg ? cfg.label : 'Todos'}
+                  <span className={`px-1 rounded-full text-[10px] font-semibold ${
+                    statusFiltro === s ? 'bg-white/20 text-white' : 'bg-muted text-muted-foreground'
+                  }`}>{count}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
         {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-5 h-5 animate-spin text-[var(--primary)]" />
+          <div className="flex flex-col gap-3">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="rounded-xl border border-border/70 bg-card p-4 animate-pulse">
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-lg bg-muted shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <div className="flex justify-between">
+                      <div className="h-4 w-2/5 bg-muted rounded-full" />
+                      <div className="h-5 w-16 bg-muted rounded-full" />
+                    </div>
+                    <div className="h-3 w-3/5 bg-muted rounded-full" />
+                    <div className="h-3 w-1/2 bg-muted rounded-full" />
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            {recolhas.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-2 text-center">
-                <Truck className="w-8 h-8 text-muted-foreground/40" />
-                <p className="text-sm font-medium text-muted-foreground">Sem pedidos de recolha</p>
-                <p className="text-xs text-muted-foreground">
-                  {isManagementView ? 'Ainda não existem pedidos para gerir.' : 'Clique em "Agendar Recolha" para criar o primeiro pedido.'}
-                </p>
+            {recolhasFiltradas.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+                <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+                  <Truck className="w-6 h-6 text-muted-foreground/50" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Sem pedidos de recolha</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {isManagementView
+                      ? 'Ainda não existem pedidos para gerir.'
+                      : statusFiltro !== 'todos'
+                        ? `Sem pedidos com estado "${statusConfig[statusFiltro]?.label ?? statusFiltro}".`
+                        : 'Ainda não criou nenhum pedido de recolha.'}
+                  </p>
+                </div>
+                {!isManagementView && statusFiltro === 'todos' && (
+                  <Button
+                    size="sm"
+                    className="gap-2 bg-[var(--primary)] hover:opacity-90 rounded-xl mt-1"
+                    onClick={abrirModal}
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                    Agendar Recolha
+                  </Button>
+                )}
               </div>
-            ) : recolhas.map((p) => {
+            ) : recolhasFiltradas.map((p) => {
               const cfg = statusConfig[p.status] ?? statusConfig['pendente']!
               const SIcon = cfg.icon
               const isOpen = expandido === p.id
@@ -371,46 +532,118 @@ function RecolhasPage() {
               return (
                 <Card
                   key={p.id}
-                  className="border border-border/70 shadow-sm rounded-xl hover:shadow-md transition-all cursor-pointer overflow-hidden"
-                  onClick={() => setExpandido(isOpen ? null : p.id)}
+                  className="border shadow-sm rounded-xl hover:shadow-md transition-all cursor-pointer overflow-hidden"
+                  style={{
+                    borderColor: `color-mix(in srgb, ${cfg.color} ${p.status === 'cancelado' ? '55%' : '30%'}, var(--border))`,
+                    backgroundColor: `color-mix(in srgb, ${cfg.color} ${p.status === 'cancelado' ? '8%' : '3%'}, var(--card))`,
+                  }}
+                  onClick={() => {
+                    if (!isOpen) {
+                      const nextStatus = p.status === 'pendente' ? 'agendado' : 'concluido'
+                      setUpdateForm({ status: nextStatus as RecolhaStatus, data_prevista: '' })
+                      setUpdateError(null)
+                    }
+                    setExpandido(isOpen ? null : p.id)
+                  }}
                 >
                   <CardContent className="p-0">
-                    <div className="p-4 flex items-center gap-4">
-                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${cfg.bg}`}>
-                        <SIcon className="w-6 h-6" style={{ color: cfg.color }} />
+                    <div className="p-4 flex items-start gap-4">
+                      <div className={`w-12 h-12 rounded-lg flex items-center justify-center shrink-0 ${cfg.bg}`}>
+                        <SIcon className="w-5 h-5" style={{ color: cfg.color }} />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-bold text-foreground truncate">{p.tipo}</p>
-                          <Badge variant="outline" className="text-[10px] font-bold uppercase tracking-tight h-5 shrink-0" style={{ color: cfg.color, borderColor: `${cfg.color}40` }}>
-                            {cfg.label}
-                          </Badge>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className={`text-sm font-semibold leading-snug truncate pr-2 ${p.status === 'cancelado' ? 'text-red-600 dark:text-red-400' : 'text-foreground'}`}>{p.tipo}</p>
+                            <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{p.subtipo}</p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <div
+                              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium"
+                              style={{ color: cfg.color, backgroundColor: `color-mix(in srgb, ${cfg.color} 14%, transparent)` }}
+                            >
+                              <SIcon className="w-3 h-3" />
+                              {cfg.label}
+                            </div>
+                            <ChevronRight className={`w-4 h-4 text-muted-foreground/50 transition-transform duration-200 ${isOpen ? 'rotate-90' : ''}`} />
+                          </div>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-0.5 truncate">{p.subtipo}</p>
-                        <div className="flex items-center gap-4 mt-2 text-[10px] text-muted-foreground font-medium">
-                          <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {p.morada}</span>
-                          <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {p.data_pedido}</span>
+                        <div className="flex items-center gap-4 mt-2 text-[11px] text-muted-foreground">
+                          <span className="flex items-center gap-1 truncate max-w-[180px]" title={p.morada}><MapPin className="w-3 h-3 shrink-0" /> {p.morada}</span>
+                          <span className="flex items-center gap-1 shrink-0"><Calendar className="w-3 h-3" /> {p.data_pedido}</span>
                         </div>
                       </div>
-                      <ChevronRight className={`w-5 h-5 text-muted-foreground/30 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
                     </div>
 
                     {isOpen && (
-                      <div className="px-4 pb-4 pt-2 border-t border-border/50 bg-muted/20">
+                      <div className="px-4 pb-4 pt-3 border-t border-border/60 bg-muted/20">
                         <div className="grid grid-cols-2 gap-4 text-xs">
                           <div className="space-y-1">
                             <p className="text-muted-foreground font-medium">Data Prevista</p>
-                            <p className="text-foreground font-semibold">{p.data_prevista ?? 'Pendente'}</p>
+                            <p className="font-semibold" style={{ color: p.status === 'cancelado' ? cfg.color : undefined }}>
+                              {p.data_prevista
+                                ? p.data_prevista
+                                : p.status === 'cancelado'
+                                  ? 'Cancelado'
+                                  : p.status === 'pendente'
+                                    ? 'Aguarda agendamento pela equipa'
+                                    : 'A definir'}
+                            </p>
                           </div>
                           <div className="space-y-1">
                             <p className="text-muted-foreground font-medium">Observações</p>
-                            <p className="text-foreground italic">"{p.obs ?? 'Sem observações'}"</p>
+                            <p className="text-foreground italic text-[11px] leading-relaxed">{p.obs ?? 'Sem observações'}</p>
                           </div>
                         </div>
-                        {p.status === 'pendente' && (
-                          <div className="mt-4">
-                            <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-                              {isManagementView ? 'A aguardar agendamento operacional' : 'Pode cancelar enquanto estiver pendente'}
+                        {isManagementView && (p.status === 'pendente' || p.status === 'agendado') && (
+                          <div className="mt-4 space-y-2" onClick={e => e.stopPropagation()}>
+                            <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Atualizar estado</p>
+                            <div className="flex flex-col sm:flex-row gap-2">
+                              <select
+                                className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                                value={expandido === p.id ? updateForm.status : (p.status === 'pendente' ? 'agendado' : 'concluido')}
+                                onChange={e => setUpdateForm(f => ({ ...f, status: e.target.value as RecolhaStatus }))}
+                              >
+                                {p.status === 'pendente' && <option value="agendado">Agendado</option>}
+                                {(p.status === 'pendente' || p.status === 'agendado') && <option value="concluido">Concluído</option>}
+                              </select>
+                              <input
+                                type="date"
+                                className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                                value={updateForm.data_prevista}
+                                onChange={e => setUpdateForm(f => ({ ...f, data_prevista: e.target.value }))}
+                                title="Data prevista (opcional)"
+                              />
+                              <Button
+                                size="sm"
+                                disabled={updatingId === p.id}
+                                className="bg-[var(--primary)] hover:opacity-90 text-xs rounded-lg"
+                                onClick={() => onUpdateStatus(p.id)}
+                              >
+                                {updatingId === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Guardar'}
+                              </Button>
+                            </div>
+                            {updateError && expandido === p.id && (
+                              <p className="text-xs text-red-600">{updateError}</p>
+                            )}
+                          </div>
+                        )}
+                        {!isManagementView && p.status === 'pendente' && (
+                          <div className="mt-4 flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row sm:items-center sm:justify-between" onClick={e => e.stopPropagation()}>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              disabled={cancellingId === p.id}
+                              onClick={() => {
+                                setCancelError(null)
+                                setCancelTargetId(p.id)
+                              }}
+                            >
+                              {cancellingId === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
+                              Cancelar pedido
+                            </Button>
+                            <span className="text-[10px] text-muted-foreground sm:text-right">
+                              Pode cancelar enquanto estiver pendente
                             </span>
                           </div>
                         )}
@@ -428,7 +661,7 @@ function RecolhasPage() {
       {modalAberto && (!isManagementView || forceCreateModal) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={fecharModal} aria-hidden="true" />
-          <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="recolhas-modal-title" tabIndex={-1} className="relative z-10 w-full max-w-md bg-card rounded-2xl shadow-2xl border border-border overflow-hidden max-h-[92vh] flex flex-col">
+          <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="recolhas-modal-title" tabIndex={-1} className="relative z-10 w-full max-w-2xl bg-card rounded-2xl shadow-2xl border border-border overflow-hidden max-h-[92vh] flex flex-col">
             <div className="px-5 py-4 border-b border-border flex items-center justify-between">
               <button type="button" aria-label="Fechar modal" onClick={fecharModal} className="w-8 h-8 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors">
                 <X className="w-5 h-5" />
@@ -451,7 +684,7 @@ function RecolhasPage() {
               </div>
             )}
 
-            <form onSubmit={onAgendar} className="flex-1 overflow-y-auto px-5 py-4">
+            <form id="recolha-form" onSubmit={onAgendar} className="flex-1 overflow-y-auto px-5 py-4">
               {enviado ? (
                 <div className="min-h-[460px] flex flex-col items-center justify-center text-center gap-5">
                   <div>
@@ -471,40 +704,49 @@ function RecolhasPage() {
                       <div>
                         <label className="text-sm font-semibold text-foreground mb-1.5 block">Tipo de recolha</label>
                         <div className="grid grid-cols-2 gap-2">
-                          {tiposRecolha.map((tipo) => (
-                            <label key={tipo} className="cursor-pointer">
-                              <input
-                                type="radio"
-                                value={tipo}
-                                checked={form.tipo === tipo}
-                                onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}
-                                className="peer sr-only"
-                              />
-                              <span className="flex h-10 items-center justify-center rounded-xl border border-border bg-background px-3 text-xs font-semibold text-muted-foreground transition-all peer-checked:border-[var(--primary)] peer-checked:bg-[var(--primary)]/10 peer-checked:text-[var(--primary)]">
-                                {tipo === 'Monos Volumosos' ? 'Monos' : 'Entulhos'}
-                              </span>
-                            </label>
-                          ))}
+                          {tiposRecolha.map((tipo) => {
+                            const TipoIcon = tipo === 'Monos Volumosos' ? Package : Layers
+                            return (
+                              <label key={tipo} className="cursor-pointer">
+                                <input
+                                  type="radio"
+                                  value={tipo}
+                                  checked={form.tipo === tipo}
+                                  onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}
+                                  className="peer sr-only"
+                                />
+                                <span className="flex h-12 items-center justify-center gap-2 rounded-xl border border-border bg-background px-3 text-xs font-semibold text-muted-foreground transition-all peer-checked:border-[var(--primary)] peer-checked:bg-[var(--primary)]/10 peer-checked:text-[var(--primary)]">
+                                  <TipoIcon className="w-4 h-4" />
+                                  {tipo === 'Monos Volumosos' ? 'Monos Volumosos' : 'Entulho de Obras'}
+                                </span>
+                              </label>
+                            )
+                          })}
                         </div>
                       </div>
 
-                      <div>
+                      <div data-field="morada">
                         <label className="text-sm font-semibold text-foreground mb-1.5 block">Localização <span className="text-destructive">*</span></label>
-                        <div className="relative">
-                          <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                          <input
-                            type="text"
-                            value={form.morada}
-                            onChange={e => { setForm(f => ({ ...f, morada: e.target.value })); setFieldErrors(prev => ({ ...prev, morada: undefined })) }}
-                            aria-invalid={!!fieldErrors.morada}
-                            placeholder="Pesquisar por rua ou código postal..."
-                            className={`w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${fieldErrors.morada ? 'border-destructive focus:ring-destructive/30' : 'border-border focus:ring-[var(--primary)]/30'}`}
+                        <div className={`rounded-xl overflow-hidden border ${fieldErrors.morada ? 'border-destructive' : 'border-border'}`} style={{ height: 260 }}>
+                          <LocationPicker
+                            value={locationCoords}
+                            onChange={setLocationCoords}
+                            onAddress={(addr) => {
+                              setForm(f => ({ ...f, morada: addr }))
+                              setFieldErrors(prev => ({ ...prev, morada: undefined }))
+                            }}
                           />
                         </div>
+                        {form.morada && (
+                          <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1">
+                            <MapPin className="w-3 h-3 shrink-0 text-[var(--primary)]" />
+                            {form.morada}
+                          </p>
+                        )}
                         {fieldErrors.morada && <p className="text-xs text-destructive mt-1">{fieldErrors.morada}</p>}
                       </div>
 
-                      <div>
+                      <div data-field="subtipo">
                         <label className="text-sm font-semibold text-foreground mb-1.5 block">Título <span className="text-destructive">*</span></label>
                         <input
                           type="text"
@@ -528,19 +770,21 @@ function RecolhasPage() {
                         />
                       </div>
 
-                      <div>
+                      <div data-field="data">
                         <label className="text-sm font-semibold text-foreground mb-1.5 block">Data <span className="text-destructive">*</span></label>
-                        <div className="relative">
-                          <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <div className={`relative flex min-h-11 items-center rounded-xl border bg-background focus-within:ring-2 ${fieldErrors.data ? 'border-destructive focus-within:ring-destructive/30' : 'border-border focus-within:ring-[var(--primary)]/30'}`}>
+                          <Calendar className="pointer-events-none absolute left-3 z-10 h-4 w-4 text-muted-foreground" />
                           <input
                             type="date"
+                            min={new Date().toISOString().split('T')[0]}
                             value={form.data}
                             onChange={e => { setForm(f => ({ ...f, data: e.target.value })); setFieldErrors(prev => ({ ...prev, data: undefined })) }}
                             aria-invalid={!!fieldErrors.data}
-                            className={`w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${fieldErrors.data ? 'border-destructive focus:ring-destructive/30' : 'border-border focus:ring-[var(--primary)]/30'}`}
+                            aria-describedby={fieldErrors.data ? 'recolha-data-error' : undefined}
+                            className="h-10 w-full rounded-xl border-0 bg-transparent pl-9 pr-3 text-sm text-foreground outline-none [color-scheme:light] dark:[color-scheme:dark]"
                           />
                         </div>
-                        {fieldErrors.data && <p className="text-xs text-destructive mt-1">{fieldErrors.data}</p>}
+                        {fieldErrors.data && <p id="recolha-data-error" className="text-xs text-destructive mt-1">{fieldErrors.data}</p>}
                       </div>
                     </div>
                   )}
@@ -567,17 +811,38 @@ function RecolhasPage() {
                             </div>
                           </div>
                         ) : (
-                          <div className="grid gap-2">
-                            <label className="h-11 rounded-full bg-muted hover:bg-muted/80 border border-border cursor-pointer flex items-center justify-center gap-2 text-sm font-medium text-foreground transition-colors">
-                              <Camera className="w-4 h-4" />
-                              Tirar uma foto
-                              <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="hidden" onChange={e => setImagemFile(e.target.files?.[0] ?? null)} />
-                            </label>
-                            <label className="h-11 rounded-full bg-muted hover:bg-muted/80 border border-border cursor-pointer flex items-center justify-center gap-2 text-sm font-medium text-foreground transition-colors">
-                              <ImageIcon className="w-4 h-4" />
-                              Escolher da galeria
-                              <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={e => setImagemFile(e.target.files?.[0] ?? null)} />
-                            </label>
+                          <div className="space-y-2">
+                            {/* Zona drag-and-drop */}
+                            <div
+                              onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+                              onDragLeave={() => setDragOver(false)}
+                              onDrop={handleDrop}
+                              className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed py-8 transition-all ${
+                                dragOver
+                                  ? 'border-[var(--primary)] bg-[var(--primary)]/5'
+                                  : 'border-border bg-muted/20 hover:border-[var(--primary)]/40'
+                              }`}
+                            >
+                              <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+                                <Upload className="w-5 h-5 text-muted-foreground" />
+                              </div>
+                              <div className="text-center">
+                                <p className="text-sm font-medium text-foreground">Arraste uma imagem para aqui</p>
+                                <p className="text-xs text-muted-foreground mt-0.5">JPG, PNG ou WebP · máx. 10 MB</p>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <label className="h-10 rounded-xl bg-muted hover:bg-muted/80 border border-border cursor-pointer flex items-center justify-center gap-2 text-xs font-medium text-foreground transition-colors">
+                                <Camera className="w-4 h-4" />
+                                Câmara
+                                <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="hidden" onChange={e => setImagemFile(e.target.files?.[0] ?? null)} />
+                              </label>
+                              <label className="h-10 rounded-xl bg-muted hover:bg-muted/80 border border-border cursor-pointer flex items-center justify-center gap-2 text-xs font-medium text-foreground transition-colors">
+                                <ImageIcon className="w-4 h-4" />
+                                Galeria
+                                <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={e => setImagemFile(e.target.files?.[0] ?? null)} />
+                              </label>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -588,9 +853,27 @@ function RecolhasPage() {
                     <div className="space-y-5">
                       <div>
                         <h3 className="text-sm font-semibold text-foreground mb-2">Localização</h3>
-                        <div className="rounded-xl border border-border bg-background min-h-32 p-3 flex items-end">
-                          <p className="text-xs text-foreground">{form.morada}</p>
-                        </div>
+                        {locationCoords ? (
+                          <div className="rounded-xl border border-border overflow-hidden relative" style={{ height: 140 }}>
+                            <img
+                              src={`/tiles/styles/basic-preview/static/${locationCoords.lng},${locationCoords.lat},15/600x280@2x.png`}
+                              alt="Mapa da localização"
+                              className="w-full h-full object-cover"
+                              onError={e => { e.currentTarget.style.display = 'none' }}
+                            />
+                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                              <MapPin className="w-7 h-7 fill-red-500 text-white drop-shadow-md" strokeWidth={1.5} />
+                            </div>
+                            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent px-3 py-2">
+                              <p className="text-[11px] text-white font-medium truncate">{form.morada}</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="rounded-xl border border-border bg-background p-3 flex items-center gap-2">
+                            <MapPin className="w-4 h-4 text-[var(--primary)] shrink-0" />
+                            <p className="text-xs text-foreground">{form.morada}</p>
+                          </div>
+                        )}
                       </div>
 
                       <div>
@@ -628,42 +911,56 @@ function RecolhasPage() {
               )}
 
               {submitError && (
-                <div className="px-5 pb-4">
-                  <p className="text-xs text-destructive">{submitError}</p>
+                <p className="text-xs text-destructive px-1 pt-1">{submitError}</p>
+              )}
+            </form>
+
+            {/* Footer fixo fora do scroll */}
+            <div className="shrink-0 px-5 pt-3 pb-4 border-t border-border bg-card">
+              {enviado ? (
+                <Button type="button" onClick={fecharModal} className="w-full rounded-full bg-[var(--primary)] hover:opacity-90 transition-opacity">
+                  Concluir
+                </Button>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  {passoAgendamento > 1 ? (
+                    <Button type="button" variant="outline" onClick={() => setPassoAgendamento((passo) => Math.max(passo - 1, 1))} className="rounded-full">
+                      <ArrowLeft className="w-4 h-4" />
+                      Voltar
+                    </Button>
+                  ) : (
+                    <div />
+                  )}
+                  {passoAgendamento < 3 ? (
+                    <Button type="button" onClick={avancarPasso} className="rounded-full bg-[var(--primary)] hover:opacity-90 transition-opacity">
+                      Continuar
+                    </Button>
+                  ) : (
+                    <Button type="submit" form="recolha-form" className="rounded-full bg-[var(--primary)] hover:opacity-90 transition-opacity" disabled={submitting}>
+                      {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                      Submeter
+                    </Button>
+                  )}
                 </div>
               )}
-              <div className="sticky bottom-0 -mx-5 px-5 pt-4 pb-1 bg-card">
-                {enviado ? (
-                  <Button type="button" onClick={fecharModal} className="w-full rounded-full bg-[var(--primary)] hover:opacity-90 transition-opacity">
-                    Concluir
-                  </Button>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    {passoAgendamento > 1 ? (
-                      <Button type="button" variant="outline" onClick={() => setPassoAgendamento((passo) => Math.max(passo - 1, 1))} className="rounded-full">
-                        <ArrowLeft className="w-4 h-4" />
-                        Voltar
-                      </Button>
-                    ) : (
-                      <div />
-                    )}
-                    {passoAgendamento < 3 ? (
-                      <Button type="button" onClick={avancarPasso} className="rounded-full bg-[var(--primary)] hover:opacity-90 transition-opacity">
-                        Continuar
-                      </Button>
-                    ) : (
-                      <Button type="submit" className="rounded-full bg-[var(--primary)] hover:opacity-90 transition-opacity" disabled={submitting}>
-                        {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                        Submeter
-                      </Button>
-                    )}
-                  </div>
-                )}
-              </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
+
+      <ConfirmationModal
+        open={cancelTargetId !== null}
+        title="Cancelar pedido de recolha?"
+        description="Esta ação irá cancelar o pedido de recolha e não pode ser anulada."
+        confirmLabel="Cancelar pedido"
+        loading={cancellingId === cancelTargetId}
+        error={cancelError}
+        onClose={() => {
+          setCancelTargetId(null)
+          setCancelError(null)
+        }}
+        onConfirm={() => void confirmCancel()}
+      />
     </div>
   )
 }

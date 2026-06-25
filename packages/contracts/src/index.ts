@@ -104,7 +104,7 @@ export interface UpdateCitizenSelfProfileRequest {
   dashboard_widgets?: Record<string, unknown>;
 }
 
-export type ReportStatus = 'pendente' | 'analise' | 'resolvido' | 'rejeitado';
+export type ReportStatus = 'pendente' | 'analise' | 'resolvido' | 'rejeitado' | 'cancelado';
 
 export type ReportTipo =
   | 'Ecoponto Cheio'
@@ -126,6 +126,10 @@ export interface ReportRecord {
   /** Coordenadas opcionais (WGS84). Reports antigos não têm. */
   lat?: number;
   lng?: number;
+  /** ID do ecoponto associado ao reporte, se aplicável. */
+  ecopontoId?: string;
+  /** ID do contentor associado ao reporte, se aplicável. */
+  contentorId?: string;
 }
 
 export interface CreateReportRequest {
@@ -137,6 +141,10 @@ export interface CreateReportRequest {
   /** Georreferenciação opcional (R2/R8). Ambas ou nenhuma. */
   lat?: number;
   lng?: number;
+  /** ID do ecoponto associado ao reporte, se aplicável. */
+  ecopontoId?: string;
+  /** ID do contentor associado ao reporte, se aplicável. */
+  contentorId?: string;
 }
 
 export interface CreateReportResponse {
@@ -166,11 +174,16 @@ export interface UpdateReportStatusResponse {
   report: ReportRecord;
 }
 
+export interface CancelReportResponse {
+  report: ReportRecord;
+}
+
 export interface ReportStatsByStatus {
   pendente: number;
   analise: number;
   resolvido: number;
   rejeitado: number;
+  cancelado: number;
 }
 
 export interface ReportZonaStat {
@@ -195,6 +208,16 @@ export interface ReportStatsQuery {
 export type EcopontoNivel = 'baixo' | 'medio' | 'alto' | 'cheio'
 export type EcopontoSensor = 'online' | 'offline' | 'alerta'
 
+export interface ContentorRecord {
+  id: string
+  ecopontoId: string
+  tipo: string
+  ocupacao: number
+  sensor_estado: EcopontoSensor
+  bateria: number | null
+  ultima_recolha: string | null
+}
+
 export interface EcopontoRecord {
   id: string
   nome: string
@@ -203,17 +226,14 @@ export interface EcopontoRecord {
   codigo_postal: string | null
   zona: string | null
   distancia_label: string
-  ocupacao: number
   nivel: EcopontoNivel
-  tipos: string[]
-  sensor_estado: EcopontoSensor
-  ultima_recolha: string | null
+  contentores: ContentorRecord[]
   ultima_atualizacao: string | null
   lat: number
   lng: number
-  bateria: number | null
   temperatura: number | null
   ativo: boolean
+
   ordem: number
 }
 
@@ -256,18 +276,33 @@ export interface ListEcopontoZonasResponse {
   zonas: string[]
 }
 
+export interface CreateContentorRequest {
+  tipo: string
+  ocupacao: number
+  sensor_estado?: EcopontoSensor
+  bateria?: number
+  ultima_recolha?: string
+}
+
 export interface CreateEcopontoRequest {
   nome: string
   codigo?: string
   morada: string
   zona?: string
-  ocupacao: number
-  tipos?: string[]
-  sensor_estado?: EcopontoSensor
-  ultima_recolha?: string
+  contentores?: CreateContentorRequest[]
   lat: number
   lng: number
+  temperatura?: number
   ordem?: number
+}
+
+export interface UpdateContentorRequest {
+  id?: string
+  tipo?: string
+  ocupacao?: number
+  sensor_estado?: EcopontoSensor
+  bateria?: number
+  ultima_recolha?: string
 }
 
 export interface UpdateEcopontoRequest {
@@ -275,12 +310,10 @@ export interface UpdateEcopontoRequest {
   codigo?: string
   morada?: string
   zona?: string
-  ocupacao?: number
-  tipos?: string[]
-  sensor_estado?: EcopontoSensor
-  ultima_recolha?: string
+  contentores?: UpdateContentorRequest[]
   lat?: number
   lng?: number
+  temperatura?: number
   ativo?: boolean
   ordem?: number
 }
@@ -462,12 +495,25 @@ export interface ListPartilhasQuery {
   pageSize?: number;
 }
 
+/** Manifestar interesse numa partilha — notifica o autor por email. */
+export interface ExpressPartilhaInterestRequest {
+  /** Mensagem opcional para o autor (ex.: melhor horário para combinar). */
+  mensagem?: string;
+}
+
+export interface ExpressPartilhaInterestResponse {
+  /** `true` se o email de notificação foi enviado ao autor. */
+  notificado: boolean;
+}
+
 /** Feed agregado da página home (ecopontos, partilhas, notícias + métricas do cidadão). */
 export interface HomeEcoponto {
   id: string;
   nome: string;
   distancia: string;
   ocupacao: number;
+  lat: number;
+  lng: number;
   map_url: string;
 }
 
@@ -664,7 +710,7 @@ export interface ReportsDuplicadosResponse {
 }
 
 /** Pedidos de recolha de monos/entulho. */
-export type RecolhaStatus = 'pendente' | 'agendado' | 'concluido'
+export type RecolhaStatus = 'pendente' | 'agendado' | 'concluido' | 'cancelado'
 
 export interface RecolhaRecord {
   id: string;
@@ -693,6 +739,21 @@ export interface CreateRecolhaRequest {
 }
 
 export interface CreateRecolhaResponse {
+  recolha: RecolhaRecord;
+}
+
+export interface CancelRecolhaResponse {
+  recolha: RecolhaRecord;
+}
+
+/** Atualização do estado de uma recolha (staff: operador/gestor/admin). */
+export interface UpdateRecolhaStatusRequest {
+  status: RecolhaStatus;
+  /** Data prevista da recolha (ISO ou texto), opcional ao agendar. */
+  data_prevista?: string | null;
+}
+
+export interface UpdateRecolhaResponse {
   recolha: RecolhaRecord;
 }
 
@@ -791,6 +852,7 @@ export interface RotaParagem {
   lng: number;
   ocupacao: number;
   ordem: number;
+  contentores?: { tipo: string; ocupacao: number }[];
 }
 
 export interface RotaRecord {
@@ -1194,4 +1256,3 @@ export interface ListSecurityLogsResponse {
   pageSize: number;
   total: number;
 }
-

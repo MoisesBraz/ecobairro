@@ -152,6 +152,32 @@ services:
       - ecobairro-network
     command: ["tsx", "src/index.ts"]
 
+  osrm-car:
+    image: osrm/osrm-backend:latest
+    restart: always
+    command: "osrm-routed --algorithm mld /data/car.osrm"
+    volumes:
+      - osm-prod-data:/data
+    networks:
+      - ecobairro-network
+
+  osrm-bike:
+    image: osrm/osrm-backend:latest
+    restart: always
+    command: "osrm-routed --algorithm mld /data/bicycle.osrm"
+    volumes:
+      - osm-prod-data:/data
+    networks:
+      - ecobairro-network
+
+  osrm-foot:
+    image: osrm/osrm-backend:latest
+    restart: always
+    command: "osrm-routed --algorithm mld /data/foot.osrm"
+    volumes:
+      - osm-prod-data:/data
+    networks:
+      - ecobairro-network
 
 networks:
   ecobairro-network:

@@ -110,6 +110,13 @@ class FakePrisma {
       }
       return { ...r };
     },
+
+    delete: async (args: { where: { id: string } }) => {
+      const i = this.rotasStore.findIndex((x) => x.id === args.where.id);
+      if (i === -1) throw makeP2025();
+      const [removed] = this.rotasStore.splice(i, 1);
+      return { ...removed! };
+    },
   };
 
   readonly equipaMembro = {
@@ -407,6 +414,77 @@ export const rotasServiceTests: TestCase[] = [
       await assert.rejects(
         () => service.create({ userId: 'c-1', role: 'CIDADAO' }, buildCreateDto() as never),
         isForbidden,
+      );
+    },
+  },
+  {
+    name: 'gestor elimina rota: desaparece da lista',
+    run: async () => {
+      const service = new RotasService(
+        new FakePrisma({
+          rotas: [buildRota({ id: 'r1' }), buildRota({ id: 'r2' })],
+        }) as never,
+      );
+
+      await service.remove('r1', { userId: 'g-1', role: 'GESTOR' });
+
+      const lista = await service.list({ userId: 'g-1', role: 'GESTOR' });
+      assert.deepEqual(lista.rotas.map((r) => r.id), ['r2']);
+      assert.equal(lista.total, 1);
+    },
+  },
+  {
+    name: 'admin elimina rota',
+    run: async () => {
+      const service = new RotasService(
+        new FakePrisma({ rotas: [buildRota({ id: 'r1' })] }) as never,
+      );
+
+      await service.remove('r1', { userId: 'a-1', role: 'ADMIN' });
+
+      const lista = await service.list({ userId: 'a-1', role: 'ADMIN' });
+      assert.equal(lista.total, 0);
+    },
+  },
+  {
+    name: 'operador não pode eliminar rota (403)',
+    run: async () => {
+      const service = new RotasService(
+        new FakePrisma({
+          rotas: [buildRota({ id: 'r1', operadorId: 'op-1' })],
+        }) as never,
+      );
+
+      await assert.rejects(
+        () => service.remove('r1', { userId: 'op-1', role: 'OPERADOR' }),
+        isForbidden,
+      );
+      // Não eliminou.
+      const lista = await service.list({ userId: 'g-1', role: 'GESTOR' });
+      assert.equal(lista.total, 1);
+    },
+  },
+  {
+    name: 'cidadão não pode eliminar rota (403)',
+    run: async () => {
+      const service = new RotasService(
+        new FakePrisma({ rotas: [buildRota({ id: 'r1' })] }) as never,
+      );
+
+      await assert.rejects(
+        () => service.remove('r1', { userId: 'c-1', role: 'CIDADAO' }),
+        isForbidden,
+      );
+    },
+  },
+  {
+    name: 'gestor a eliminar rota inexistente recebe 404',
+    run: async () => {
+      const service = new RotasService(new FakePrisma({ rotas: [] }) as never);
+
+      await assert.rejects(
+        () => service.remove('r-missing', { userId: 'g-1', role: 'GESTOR' }),
+        isNotFound,
       );
     },
   },

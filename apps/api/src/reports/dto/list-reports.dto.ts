@@ -1,7 +1,7 @@
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
-const REPORT_STATUS = ['pendente', 'analise', 'resolvido', 'rejeitado'] as const;
+const REPORT_STATUS = ['pendente', 'analise', 'resolvido', 'rejeitado', 'cancelado'] as const;
 const REPORT_TIPOS = [
   'Ecoponto Cheio',
   'Deposição Ilegal',

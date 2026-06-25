@@ -20,6 +20,7 @@ import { useEffect, useRef, useState, type ElementType, type ReactNode } from 'r
 import { fetchJson } from '@/lib/http/fetch-json'
 import { clientEnv } from '@/lib/env'
 import { getAccessToken, getDefaultRouteForRole, getUser } from '@/lib/auth'
+import { removeFavorito } from '@/lib/api/favoritos'
 import type { HomeFeedResponse, HomeNoticia } from '@ecobairro/contracts'
 
 export const Route = createFileRoute('/_layoutpublic/home')({
@@ -33,6 +34,72 @@ export const Route = createFileRoute('/_layoutpublic/home')({
 })
 
 /* ─── Helpers ─── */
+export function useDragScroll<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    let isDown = false;
+    let startX: number;
+    let scrollLeft: number;
+    let dragged = false;
+
+    const onMouseDown = (e: globalThis.MouseEvent) => {
+      isDown = true;
+      dragged = false;
+      startX = e.pageX - el.offsetLeft;
+      scrollLeft = el.scrollLeft;
+    };
+
+    const onMouseLeave = () => {
+      isDown = false;
+      if (dragged) setIsDragging(false);
+    };
+
+    const onMouseUp = () => {
+      isDown = false;
+      setTimeout(() => setIsDragging(false), 0);
+    };
+
+    const onMouseMove = (e: globalThis.MouseEvent) => {
+      if (!isDown) return;
+      const x = e.pageX - el.offsetLeft;
+      const walk = (x - startX) * 2;
+      if (Math.abs(walk) > 5) {
+        dragged = true;
+        setIsDragging(true);
+        e.preventDefault();
+      }
+      el.scrollLeft = scrollLeft - walk;
+    };
+
+    const onClick = (e: globalThis.MouseEvent) => {
+      if (dragged) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    el.addEventListener('mousedown', onMouseDown);
+    el.addEventListener('mouseleave', onMouseLeave);
+    el.addEventListener('mouseup', onMouseUp);
+    el.addEventListener('mousemove', onMouseMove);
+    el.addEventListener('click', onClick, { capture: true });
+
+    return () => {
+      el.removeEventListener('mousedown', onMouseDown);
+      el.removeEventListener('mouseleave', onMouseLeave);
+      el.removeEventListener('mouseup', onMouseUp);
+      el.removeEventListener('mousemove', onMouseMove);
+      el.removeEventListener('click', onClick, { capture: true });
+    };
+  }, []);
+
+  return { ref, isDragging };
+}
 function getGreeting() {
   const h = new Date().getHours()
   if (h < 12) return 'Bom dia'
@@ -137,6 +204,12 @@ const MOCK_NOTICIAS = [
     tempo_leitura: '5 min',
   },
 ]
+
+function getLocalStaticMapUrl(lat?: number, lon?: number, zoom: number = 16) {
+  if (lat == null || lon == null) return null;
+  // Use local tileserver-gl static image endpoint
+  return `/tiles/styles/basic-preview/static/${lon},${lat},${zoom}/400x200@2x.png`;
+}
 
 const STEPS = [
   {
@@ -755,10 +828,10 @@ function NoticiasSection({ noticias }: { noticias?: HomeNoticia[] }) {
             </h2>
           </div>
           <Link
-            to="/login"
+            to="/register"
             className="flex items-center gap-1.5 text-sm text-[var(--primary)] font-semibold hover:opacity-75 transition-opacity"
           >
-            Ver todas as notícias <ArrowRight className="w-4 h-4" />
+            Criar conta para ler mais <ArrowRight className="w-4 h-4" />
           </Link>
         </div>
 
@@ -791,6 +864,7 @@ function NoticiasSection({ noticias }: { noticias?: HomeNoticia[] }) {
                       alt={n.titulo}
                       className="w-full h-full object-cover"
                       loading="lazy"
+                      onError={(e) => { e.currentTarget.style.display = 'none' }}
                     />
                     {/* Category badge */}
                     <span
@@ -1110,11 +1184,18 @@ function ScrollToTopButton() {
 }
 
 /* ─── Página ─── */
+function SkeletonBlock({ className }: { className?: string }) {
+  return <div className={`animate-pulse rounded-lg bg-muted ${className ?? ''}`} />
+}
+
 function HomePage() {
   const token = getAccessToken()
   const sessionUser = getUser()
   const greeting = getGreeting()
   const [feed, setFeed] = useState<HomeFeedResponse | null>(null)
+  const [feedLoading, setFeedLoading] = useState(true)
+  const [favToRemove, setFavToRemove] = useState<string | null>(null)
+  const { ref: dragScrollRef, isDragging } = useDragScroll<HTMLDivElement>()
   
   // isGuest decidido pelo sessionStorage (síncrono no 1º render) — não pelo
   // feed que só chega depois do fetch resolver. Sem isto havia flash da
@@ -1138,11 +1219,31 @@ function HomePage() {
         setFeed(data)
       } catch {
         setFeed(null)
+      } finally {
+        setFeedLoading(false)
       }
     }
 
     void load()
   }, [token])
+
+  async function handleRemoveFavorito(e: React.MouseEvent, id: string) {
+    e.preventDefault()
+    e.stopPropagation()
+    setFavToRemove(id)
+  }
+
+  async function confirmRemoveFavorito() {
+    if (!favToRemove) return
+    try {
+      await removeFavorito(favToRemove)
+      setFeed((prev) => prev ? { ...prev, ecopontos: prev.ecopontos.filter(x => x.id !== favToRemove) } : null)
+    } catch (err) {
+      console.error('Erro ao remover favorito:', err)
+    } finally {
+      setFavToRemove(null)
+    }
+  }
 
   const gamification = feed?.gamification ?? {
     nivel: 'Reciclador',
@@ -1206,31 +1307,48 @@ function HomePage() {
       >
         <HeroBlob />
         <CardContent className="p-6 relative z-10 flex flex-col sm:flex-row sm:items-center gap-5 justify-between">
-          <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">{greeting} 👋</p>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
-              Olá, <span className="text-[var(--primary)]">{firstName}</span>!
-            </h1>
-            <p className="text-sm text-muted-foreground max-w-sm leading-relaxed">
-              Aqui está o resumo da sua atividade no ecoBairro.
-            </p>
-          </div>
-          <div className="flex flex-col gap-2 sm:items-end min-w-[200px]">
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 bg-[var(--primary)]/10 rounded-full px-2.5 py-1">
-                <Star className="w-3 h-3 text-[var(--primary)]" fill="currentColor" />
-                <span className="text-xs font-semibold text-[var(--primary)]">{gamification.nivel}</span>
+          {feedLoading ? (
+            <div className="flex flex-col sm:flex-row sm:items-center gap-5 justify-between w-full">
+              <div className="space-y-2 flex-1">
+                <SkeletonBlock className="h-4 w-24" />
+                <SkeletonBlock className="h-8 w-48" />
+                <SkeletonBlock className="h-4 w-64" />
               </div>
-              <span className="text-xs text-muted-foreground">
-                <Counter to={gamification.pontos} /> pts
-              </span>
+              <div className="flex flex-col gap-2 sm:items-end min-w-[200px]">
+                <SkeletonBlock className="h-6 w-32" />
+                <SkeletonBlock className="h-2 w-full" />
+                <SkeletonBlock className="h-3 w-40" />
+              </div>
             </div>
-            <Progress value={progressoGamificacao} className="h-2 w-full [&>div]:bg-[var(--primary)]" />
-            <p className="text-[11px] text-muted-foreground">
-              Faltam <span className="font-semibold text-foreground">{pontosRestantes} pts</span> para{' '}
-              <span className="font-medium">{reportStats.proximoNivel}</span>
-            </p>
-          </div>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">{greeting} 👋</p>
+                <h1 className="text-2xl font-bold tracking-tight text-foreground">
+                  Olá, <span className="text-[var(--primary)]">{firstName}</span>!
+                </h1>
+                <p className="text-sm text-muted-foreground max-w-sm leading-relaxed">
+                  Aqui está o resumo da sua atividade no ecoBairro.
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 sm:items-end min-w-[200px]">
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 bg-[var(--primary)]/10 rounded-full px-2.5 py-1">
+                    <Star className="w-3 h-3 text-[var(--primary)]" fill="currentColor" />
+                    <span className="text-xs font-semibold text-[var(--primary)]">{gamification.nivel}</span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    <Counter to={gamification.pontos} /> pts
+                  </span>
+                </div>
+                <Progress value={progressoGamificacao} className="h-2 w-full [&>div]:bg-[var(--primary)]" />
+                <p className="text-[11px] text-muted-foreground">
+                  Faltam <span className="font-semibold text-foreground">{pontosRestantes} pts</span> para{' '}
+                  <span className="font-medium">{reportStats.proximoNivel}</span>
+                </p>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 
@@ -1267,21 +1385,88 @@ function HomePage() {
               </Link>
             }
           />
-          <div className="flex overflow-x-auto snap-x snap-mandatory hide-scrollbar gap-3 pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:grid sm:grid-cols-2 lg:grid-cols-3">
-            {ecopontos.map((eco) => {
+          <div 
+            ref={dragScrollRef}
+            className={`flex overflow-x-auto hide-scrollbar gap-4 pb-4 -mx-4 px-4 sm:mx-0 sm:px-0 ${isDragging ? 'cursor-grabbing' : 'snap-x snap-mandatory cursor-grab'}`}
+          >
+            {feedLoading ? (
+              // Skeleton de favoritos enquanto carrega
+              [1,2,3].map(i => (
+                <div key={i} className="w-[280px] sm:w-[320px] snap-start shrink-0">
+                  <div className="rounded-xl border border-border/70 overflow-hidden bg-card h-[220px] flex flex-col">
+                    <SkeletonBlock className="h-28 w-full rounded-none" />
+                    <div className="p-4 space-y-3 flex-1">
+                      <SkeletonBlock className="h-4 w-3/4" />
+                      <SkeletonBlock className="h-3 w-1/2" />
+                      <SkeletonBlock className="h-2 w-full mt-4" />
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : ecopontos.length === 0 ? (
+              // Estado vazio
+              <div className="flex flex-col items-center justify-center gap-3 py-8 px-6 w-full text-center rounded-xl border border-dashed border-border">
+                <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+                  <Star className="w-5 h-5 text-muted-foreground" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Sem favoritos ainda</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Adicione ecopontos ao mapa para os ver aqui</p>
+                </div>
+                <Link to="/mapa" className="text-xs font-medium text-[var(--primary)] flex items-center gap-1 hover:underline">
+                  Ir ao mapa <ChevronRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+            ) : null}
+            {!feedLoading && ecopontos.map((eco) => {
               const state = ecoState(eco.ocupacao)
+              const hasMapUrl = eco.map_url && eco.map_url !== 'undefined' && eco.map_url !== 'null' && eco.map_url.trim() !== ''
+              const finalImage = hasMapUrl ? eco.map_url : getLocalStaticMapUrl(eco.lat, eco.lng, 16)
+
               return (
-                <Link to="/mapa" key={eco.id} className="block min-w-[260px] sm:min-w-0 snap-start shrink-0 outline-none group">
+                <Link 
+                  to="/mapa"
+                  search={{ ecoponto: eco.id }}
+                  key={eco.id} 
+                  className="block w-[280px] sm:w-[320px] snap-start shrink-0 outline-none group select-none"
+                  draggable={false}
+                >
                   <Card className="h-full border border-border/70 shadow-sm rounded-xl hover:shadow-md hover:border-[var(--primary)]/40 transition-all cursor-pointer overflow-hidden flex flex-col bg-card">
                     
-                    <div className="w-full h-28 bg-muted relative overflow-hidden shrink-0 border-b border-border/50 flex items-center justify-center">
+                    <div className="w-full h-28 relative overflow-hidden shrink-0 border-b border-border/50 flex items-center justify-center bg-[#f8f9fa] dark:bg-[#1a1c1e]">
+                      <div className="absolute inset-0 opacity-[0.05] dark:opacity-[0.08]" 
+                           style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M54.627 0l.83.83-29.35 29.35c-1.126 1.126-2.95 1.126-4.076 0-1.126-1.125-1.126-2.95 0-4.076L51.382 0h3.245zM14.545 0l-.83.83 29.35 29.35c1.126 1.126 2.95 1.126 4.076 0 1.126-1.125 1.126-2.95 0-4.076L17.79 0h-3.245zM0 14.545l.83-.83 29.35 29.35c1.126 1.126 1.126 2.95 0 4.076-1.125 1.126-2.95 1.126-4.076 0L0 17.79v-3.245zM0 54.627l.83-.83 29.35 29.35c1.126 1.126 1.126 2.95 0 4.076-1.125 1.126-2.95 1.126-4.076 0L0 57.872v-3.245z' fill='%23000000' fill-rule='evenodd'/%3E%3C/svg%3E")` }} />
+                      
                       <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-foreground to-transparent" />
-                      <img 
-                        src={eco.map_url || ''} 
-                        alt="Mapa" 
-                        className="absolute inset-0 w-full h-full object-cover z-10 transition-transform duration-700 group-hover:scale-110" 
-                        onError={(e) => { e.currentTarget.style.display = 'none'; }} 
-                      />
+                      
+                      {finalImage && (
+                        <img 
+                          draggable={false}
+                          src={finalImage} 
+                          alt="Mapa" 
+                          className="absolute inset-0 w-full h-full object-cover z-10 transition-transform duration-700 group-hover:scale-110" 
+                          onError={(e) => { 
+                            const osm = getLocalStaticMapUrl(eco.lat, eco.lng, 16);
+                            if (osm && e.currentTarget.src !== osm) {
+                              e.currentTarget.src = osm;
+                            } else {
+                              e.currentTarget.style.display = 'none';
+                            }
+                          }} 
+                        />
+                      )}
+                      {!finalImage && (
+                        <div className="absolute inset-0 z-10 flex items-center justify-center">
+                          <MapPin className="w-8 h-8 text-muted-foreground/30" />
+                        </div>
+                      )}
+                      <button 
+                        onClick={(e) => void handleRemoveFavorito(e, eco.id)}
+                        className="absolute top-2 right-2 z-30 p-1.5 rounded-full bg-black/30 hover:bg-black/50 text-amber-400 transition-colors"
+                        title="Remover dos favoritos"
+                      >
+                        <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                      </button>
                       <MapPin className="relative z-20 w-8 h-8 fill-red-500 text-white drop-shadow-md transition-transform duration-300 group-hover:-translate-y-1" strokeWidth={1.5} />
                     </div>
 
@@ -1395,9 +1580,9 @@ function HomePage() {
           <SectionHeader icon={FileText} title="Histórico de Reports" />
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[
-              { label: 'Ativos', value: reportStats.ativos, icon: TrendingUp, color: '#fb923c' },
-              { label: 'Resolvidos', value: reportStats.resolvidos, icon: CheckCircle, color: 'oklch(0.55 0.18 150)' },
-              { label: 'Total', value: reportStats.total, icon: Package, color: '#8A93A4' },
+              { label: 'Ativos', value: reportStats.ativos, icon: TrendingUp, color: '#fb923c', desc: 'Em aberto' },
+              { label: 'Resolvidos', value: reportStats.resolvidos, icon: CheckCircle, color: 'oklch(0.55 0.18 150)', desc: 'Concluídos' },
+              { label: 'Total', value: reportStats.total, icon: Package, color: '#8A93A4', desc: 'Enviados no total' },
             ].map((stat) => {
               const Icon = stat.icon
               return (
@@ -1413,7 +1598,7 @@ function HomePage() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-foreground"><Counter to={stat.value} /></div>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">Reportes enviados</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">{stat.desc}</p>
                   </CardContent>
                 </Card>
               )
@@ -1448,7 +1633,18 @@ function HomePage() {
           <div className="flex flex-col rounded-xl border border-border/70 bg-card overflow-hidden divide-y divide-border">
             {partilhas.map((p) => (
               <div key={p.id} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer">
-                <div className="w-8 h-8 rounded-lg bg-[var(--primary)]/10 flex items-center justify-center shrink-0">
+                {(p as any).imagem_url ? (
+                  <img
+                    src={(p as any).imagem_url}
+                    alt={p.titulo}
+                    className="w-9 h-9 rounded-lg object-cover shrink-0 border border-border/50"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none'
+                      e.currentTarget.nextElementSibling?.removeAttribute('style')
+                    }}
+                  />
+                ) : null}
+                <div className="w-9 h-9 rounded-lg bg-[var(--primary)]/10 flex items-center justify-center shrink-0" style={(p as any).imagem_url ? { display: 'none' } : {}}>
                   <Package className="w-4 h-4 text-[var(--primary)]" />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -1496,12 +1692,17 @@ function HomePage() {
             >
               <Link to={"/noticia/" + n.id} className="block h-full">
                 <Card className="h-full overflow-hidden shadow-sm border border-border/70 group rounded-xl bg-card relative">
-                  <div className="h-36 w-full overflow-hidden bg-muted relative">
-                    <img
-                      src={n.imagem_url}
-                      alt={n.titulo}
-                      className="w-full h-full object-cover"
-                    />
+                  <div className="h-36 w-full overflow-hidden bg-muted relative flex items-center justify-center">
+                    {n.imagem_url ? (
+                      <img
+                        src={n.imagem_url}
+                        alt={n.titulo}
+                        className="w-full h-full object-cover"
+                        onError={(e) => { e.currentTarget.style.display = 'none' }}
+                      />
+                    ) : (
+                      <Newspaper className="w-8 h-8 text-muted-foreground/30" />
+                    )}
                   </div>
                   <CardContent className="p-4 space-y-1.5 relative z-10">
                     <p className="font-semibold text-sm text-foreground leading-snug group-hover:text-[var(--primary)] transition-colors">
@@ -1521,6 +1722,37 @@ function HomePage() {
       </section>
 
       <ScrollToTopButton />
+
+      {/* Fav Remove Modal */}
+      {favToRemove && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-card w-full max-w-sm rounded-xl shadow-xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 text-center space-y-4">
+              <div className="w-12 h-12 rounded-full bg-destructive/10 text-destructive mx-auto flex items-center justify-center">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-bold text-foreground">Remover dos Favoritos?</h3>
+              <p className="text-sm text-muted-foreground">
+                Tem a certeza que deseja remover este ecoponto da sua lista de favoritos?
+              </p>
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setFavToRemove(null); }}
+                  className="flex-1 px-4 py-2 border border-border text-foreground text-sm font-medium rounded-lg hover:bg-accent transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); void confirmRemoveFavorito(); }}
+                  className="flex-1 px-4 py-2 bg-destructive text-white text-sm font-medium rounded-lg hover:bg-destructive/90 transition-colors"
+                >
+                  Remover
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

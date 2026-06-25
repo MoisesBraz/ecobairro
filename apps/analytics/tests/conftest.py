@@ -19,14 +19,23 @@ CREATE TABLE ecopontos (
     lat           double precision NOT NULL,
     lng           double precision NOT NULL,
     ativo         boolean NOT NULL DEFAULT true,
-    ocupacao      integer NOT NULL DEFAULT 0,
     zona          text,
-    sensor_estado text NOT NULL DEFAULT 'online',
-    bateria       integer,
     geom          geometry(Point, 4326)
                   GENERATED ALWAYS AS (ST_SetSRID(ST_MakePoint(lng, lat), 4326)) STORED
 );
 CREATE INDEX ecopontos_geom_gist ON ecopontos USING GIST (geom);
+
+-- Enchimento/estado por contentor (migração 20260621213121_contentores): 1 ecoponto
+-- → N contentores. As queries operacionais agregam (MAX ocupacao, pior estado).
+CREATE TABLE contentores (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    ecoponto_id   uuid NOT NULL REFERENCES ecopontos(id) ON DELETE CASCADE,
+    tipo          text NOT NULL,
+    ocupacao      integer NOT NULL DEFAULT 0,
+    sensor_estado text NOT NULL DEFAULT 'online',
+    bateria       integer
+);
+CREATE INDEX contentores_ecoponto_id_idx ON contentores (ecoponto_id);
 
 CREATE TABLE reports (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -55,11 +64,18 @@ def _init_schema(url: str) -> None:
     with psycopg.connect(url) as conn:
         with conn.cursor() as cur:
             cur.execute(_DDL)
-            cur.executemany(
-                "INSERT INTO ecopontos (nome, lat, lng, ativo, ocupacao, zona, sensor_estado) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                SEED,
-            )
+            for nome, lat, lng, ativo, zona, contentores in SEED:
+                cur.execute(
+                    "INSERT INTO ecopontos (nome, lat, lng, ativo, zona) "
+                    "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                    (nome, lat, lng, ativo, zona),
+                )
+                ecoponto_id = cur.fetchone()[0]
+                cur.executemany(
+                    "INSERT INTO contentores (ecoponto_id, tipo, ocupacao, sensor_estado, bateria) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    [(ecoponto_id, tipo, ocup, sensor, bat) for tipo, ocup, sensor, bat in contentores],
+                )
             # Expande (…, dias, horas) → (…, criado_em=dias, atualizado_em=dias+horas).
             report_rows = [
                 (titulo, tipo, status, lat, lng, dias, dias, horas)

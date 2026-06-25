@@ -1,0 +1,18 @@
+Alguém tem interesse na sua partilha
+
+Boas notícias! Um membro da comunidade demonstrou interesse no objeto que
+partilhou no ecoBairro:
+
+Partilha: {{tituloPartilha}}
+Zona: {{zona}}
+
+Para combinar a entrega, pode contactar diretamente quem demonstrou interesse:
+
+Nome: {{interessadoNome}}
+Email: {{interessadoEmail}}
+Mensagem: {{mensagem}}
+
+Recebeu este email porque publicou esta partilha no ecoBairro. Se já não está
+disponível, basta ignorar.
+
+— ecoBairro

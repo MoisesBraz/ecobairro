@@ -18,6 +18,23 @@ export default defineConfig({
     allowedHosts: true,
     port: 5173,
     strictPort: true,
+    proxy: {
+      '/osrm/car': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/osrm\/car/, '')
+      },
+      '/osrm/bike': {
+        target: 'http://localhost:5001',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/osrm\/bike/, '')
+      },
+      '/osrm/foot': {
+        target: 'http://localhost:5002',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/osrm\/foot/, '')
+      }
+    }
   },
   resolve: {
     alias: {

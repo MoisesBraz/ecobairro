@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Inject,
   Param,
@@ -12,6 +13,7 @@ import {
 } from '@nestjs/common';
 import type {
   CreateReportResponse,
+  CancelReportResponse,
   ListReportsResponse,
   ReportStatsResponse,
   UpdateReportStatusResponse,
@@ -48,6 +50,14 @@ export class ReportsController {
     @Query() query: ListReportsDto,
   ): Promise<ListReportsResponse> {
     return this.reportsService.listMyReports(user.userId, user.role, query);
+  }
+
+  @Delete(':id')
+  cancelMine(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) reportId: string,
+  ): Promise<CancelReportResponse> {
+    return this.reportsService.cancelOwnReport(user.userId, user.role, reportId);
   }
 
   @Get('stats')

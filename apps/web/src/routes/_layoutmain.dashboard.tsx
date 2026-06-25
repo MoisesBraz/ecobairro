@@ -26,6 +26,7 @@ const estadoBadge: Record<ReportStatus, { label: string; variant: 'default' | 's
   analise: { label: 'Em análise', variant: 'default' },
   resolvido: { label: 'Resolvido', variant: 'secondary' },
   rejeitado: { label: 'Rejeitado', variant: 'destructive' },
+  cancelado: { label: 'Cancelado', variant: 'outline' },
 }
 
 const EXPORT_LIMIT = 100

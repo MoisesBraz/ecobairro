@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { RecolhasService } from '../../src/recolhas/recolhas.service';
 import type { TestCase } from '../test-helpers';
 
@@ -69,6 +71,42 @@ class FakePrismaRecolhas {
       };
       this.store.push(row);
       return { ...row };
+    },
+    findUnique: async (args: {
+      where: { id: string };
+      select?: { status?: boolean; userId?: boolean };
+    }) => {
+      const row = this.store.find((r) => r.id === args.where.id);
+      if (!row) return null;
+      return args.select ? { status: row.status, userId: row.userId } : { ...row };
+    },
+    update: async (args: {
+      where: { id: string };
+      data: { status?: string; dataPrevista?: string | null };
+    }) => {
+      const row = this.store.find((r) => r.id === args.where.id);
+      if (!row) {
+        throw new Prisma.PrismaClientKnownRequestError('Record not found', {
+          code: 'P2025',
+          clientVersion: 'test',
+        });
+      }
+      if (args.data.status !== undefined) row.status = args.data.status;
+      if (args.data.dataPrevista !== undefined) {
+        row.dataPrevista = args.data.dataPrevista ?? null;
+      }
+      return { ...row };
+    },
+    updateMany: async (args: {
+      where: { id: string; userId: string; status: string };
+      data: { status: string };
+    }) => {
+      const row = this.store.find(
+        (r) => r.id === args.where.id && r.userId === args.where.userId && r.status === args.where.status,
+      );
+      if (!row) return { count: 0 };
+      row.status = args.data.status;
+      return { count: 1 };
     },
   };
 
@@ -191,6 +229,117 @@ export const recolhasServiceTests: TestCase[] = [
       const res = await service.list('gestor', 'OPERADOR', { page: 1, pageSize: 10 });
       assert.equal(res.total, 2);
       assert.deepEqual(res.recolhas.map((r) => r.id), ['1', '2']);
+    },
+  },
+  {
+    name: 'staff atualiza o estado e a data prevista de uma recolha',
+    run: async () => {
+      const prisma = new FakePrismaRecolhas([
+        {
+          id: 'r1', tipo: 'Monos', subtipo: 'Sofá', morada: 'Rua X', status: 'pendente',
+          obs: null, criadoEm: new Date('2026-05-01T10:00:00.000Z'), dataPrevista: null, userId: 'u1',
+        },
+      ]);
+      const service = new RecolhasService(prisma as never);
+      const updated = await service.updateStatus('GESTOR', 'r1', {
+        status: 'agendado',
+        data_prevista: '10/07/2026',
+      });
+      assert.equal(updated.status, 'agendado');
+      assert.equal(updated.data_prevista, '10/07/2026');
+    },
+  },
+  {
+    name: 'cidadão não pode atualizar o estado de uma recolha (403)',
+    run: async () => {
+      const prisma = new FakePrismaRecolhas([
+        {
+          id: 'r1', tipo: 'Monos', subtipo: 'Sofá', morada: 'Rua X', status: 'pendente',
+          obs: null, criadoEm: new Date('2026-05-01T10:00:00.000Z'), dataPrevista: null, userId: 'u1',
+        },
+      ]);
+      const service = new RecolhasService(prisma as never);
+      await assert.rejects(
+        () => service.updateStatus('CIDADAO', 'r1', { status: 'concluido' }),
+        (e: Error) => e instanceof ForbiddenException && e.message === 'Não tem permissão para esta acção.',
+      );
+    },
+  },
+  {
+    name: 'atualizar recolha inexistente devolve 404',
+    run: async () => {
+      const service = new RecolhasService(new FakePrismaRecolhas() as never);
+      await assert.rejects(
+        () => service.updateStatus('GESTOR', 'nao-existe', { status: 'agendado' }),
+        (e: Error) => e instanceof NotFoundException && e.message === 'O recurso pedido não foi encontrado.',
+      );
+    },
+  },
+  {
+    name: 'transição inválida de estado devolve 400',
+    run: async () => {
+      const { BadRequestException } = await import('@nestjs/common');
+      const prisma = new FakePrismaRecolhas([
+        {
+          id: 'r2', tipo: 'Entulho', subtipo: 'Tijolos', morada: 'Rua Y', status: 'concluido',
+          obs: null, criadoEm: new Date('2026-05-01T10:00:00.000Z'), dataPrevista: null, userId: 'u1',
+        },
+      ]);
+      const service = new RecolhasService(prisma as never);
+      await assert.rejects(
+        () => service.updateStatus('GESTOR', 'r2', { status: 'pendente' }),
+        (e: Error) => e instanceof BadRequestException,
+      );
+    },
+  },
+  {
+    name: 'cidadão cancela o próprio pedido pendente',
+    run: async () => {
+      const prisma = new FakePrismaRecolhas([
+        {
+          id: 'r3', tipo: 'Monos', subtipo: 'Sofá', morada: 'Rua X', status: 'pendente',
+          obs: null, criadoEm: new Date('2026-05-01T10:00:00.000Z'), dataPrevista: null, userId: 'u1',
+        },
+      ]);
+      const service = new RecolhasService(prisma as never);
+
+      const result = await service.cancel('u1', 'CIDADAO', 'r3');
+
+      assert.equal(result.status, 'cancelado');
+    },
+  },
+  {
+    name: 'cidadão não cancela pedido de outro utilizador',
+    run: async () => {
+      const prisma = new FakePrismaRecolhas([
+        {
+          id: 'r4', tipo: 'Monos', subtipo: 'Sofá', morada: 'Rua X', status: 'pendente',
+          obs: null, criadoEm: new Date('2026-05-01T10:00:00.000Z'), dataPrevista: null, userId: 'u2',
+        },
+      ]);
+      const service = new RecolhasService(prisma as never);
+
+      await assert.rejects(
+        () => service.cancel('u1', 'CIDADAO', 'r4'),
+        (error: Error) => error instanceof NotFoundException,
+      );
+    },
+  },
+  {
+    name: 'cidadão não cancela pedido já agendado',
+    run: async () => {
+      const prisma = new FakePrismaRecolhas([
+        {
+          id: 'r5', tipo: 'Monos', subtipo: 'Sofá', morada: 'Rua X', status: 'agendado',
+          obs: null, criadoEm: new Date('2026-05-01T10:00:00.000Z'), dataPrevista: '10/07/2026', userId: 'u1',
+        },
+      ]);
+      const service = new RecolhasService(prisma as never);
+
+      await assert.rejects(
+        () => service.cancel('u1', 'CIDADAO', 'r5'),
+        (error: Error) => error instanceof ConflictException,
+      );
     },
   },
 ];

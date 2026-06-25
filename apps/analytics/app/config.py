@@ -26,6 +26,6 @@ def get_settings() -> Settings:
         jwt_access_secret=os.getenv("JWT_ACCESS_SECRET", "dev-access-secret-change-me"),
         jwt_algorithms=("HS256",),
         redis_url=os.getenv("REDIS_URL"),
-        # Servidor OSRM para o cálculo de rotas (OP4). Default = demo público OSM.
-        osrm_base_url=os.getenv("OSRM_BASE_URL", "https://router.project-osrm.org"),
+        # Servidor OSRM para o cálculo de rotas (OP4). Default = motor local (carro).
+        osrm_base_url=os.getenv("OSRM_BASE_URL", "http://osrm-car:5000"),
     )

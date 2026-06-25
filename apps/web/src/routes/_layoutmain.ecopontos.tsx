@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { PlusCircle, MapPin, X, Save, Pencil, Trash2, Wifi, WifiOff } from 'lucide-react'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useModalA11y } from '@/lib/use-modal-a11y'
-import { useForm } from 'react-hook-form'
+import { useForm, useFieldArray } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { PaginationBar } from '@/components/ui/pagination-bar'
@@ -25,7 +25,7 @@ import type {
 } from '@ecobairro/contracts'
 
 export const Route = createFileRoute('/_layoutmain/ecopontos')({
-  beforeLoad: requireRole(['admin']),
+  beforeLoad: requireRole(['admin', 'gestor']),
   component: EcopontosPage,
 })
 
@@ -46,7 +46,10 @@ const ecopontoSchema = z.object({
   nome: z.string().min(2, 'Nome obrigatório'),
   codigo: z.string().optional(),
   morada: z.string().min(3, 'Morada obrigatória'),
-  ocupacao: z.number().min(0).max(100),
+  contentores: z.array(z.object({
+    tipo: z.string().min(1, 'Tipo obrigatório'),
+    ocupacao: z.number().min(0).max(100),
+  })),
   lat: z.number(),
   lng: z.number(),
 })
@@ -84,8 +87,13 @@ function EcopontosPage() {
   const modalRef = useRef<HTMLDivElement>(null)
   useModalA11y(modal !== null, modalRef, () => setModal(null))
 
-  const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<EcopontoForm>({
+  const { register, control, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<EcopontoForm>({
     resolver: zodResolver(ecopontoSchema),
+  })
+
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: 'contentores',
   })
 
   // Ponte react-hook-form ↔ LocationPicker: lat/lng vivem no form (inputs hidden),
@@ -159,7 +167,7 @@ function EcopontosPage() {
 
   function abrirNovo() {
     setEditando(null)
-    reset({ nome: '', codigo: '', morada: '', ocupacao: 0, lat: AVEIRO_CENTER.lat, lng: AVEIRO_CENTER.lng })
+    reset({ nome: '', codigo: '', morada: '', contentores: [{ tipo: 'Papel', ocupacao: 0 }], lat: AVEIRO_CENTER.lat, lng: AVEIRO_CENTER.lng })
     setModal('novo')
   }
 
@@ -169,7 +177,7 @@ function EcopontosPage() {
       nome: ep.nome,
       codigo: ep.codigo ?? '',
       morada: ep.morada,
-      ocupacao: ep.ocupacao,
+      contentores: ep.contentores.map(c => ({ tipo: c.tipo, ocupacao: c.ocupacao })),
       lat: ep.lat,
       lng: ep.lng,
     })
@@ -187,7 +195,7 @@ function EcopontosPage() {
           nome: data.nome,
           codigo: data.codigo ?? undefined,
           morada: data.morada,
-          ocupacao: data.ocupacao,
+          contentores: data.contentores,
           ...(coordsChanged ? { lat: data.lat, lng: data.lng } : {}),
         }
         await fetchJson(`/v1/ecopontos/${editando.id}`, {
@@ -201,7 +209,7 @@ function EcopontosPage() {
           nome: data.nome,
           codigo: data.codigo ?? undefined,
           morada: data.morada,
-          ocupacao: data.ocupacao,
+          contentores: data.contentores,
           lat: data.lat,
           lng: data.lng,
         }
@@ -262,8 +270,8 @@ function EcopontosPage() {
       {/* KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Online',     value: ecopontos.filter(e => e.sensor_estado === 'online').length,  color: 'oklch(0.55 0.18 150)' },
-          { label: 'Offline',    value: ecopontos.filter(e => e.sensor_estado === 'offline').length, color: '#94a3b8'               },
+          { label: 'Online',     value: ecopontos.filter(e => e.contentores.some(c => c.sensor_estado === 'online')).length,  color: 'oklch(0.55 0.18 150)' },
+          { label: 'Offline',    value: ecopontos.filter(e => e.contentores.some(c => c.sensor_estado === 'offline')).length, color: '#94a3b8'               },
           { label: 'Cheios',     value: ecopontos.filter(e => e.nivel === 'cheio').length,           color: '#f87171'               },
           { label: 'Nível Alto', value: ecopontos.filter(e => e.nivel === 'alto').length,            color: '#fb923c'               },
         ].map((s) => (
@@ -347,7 +355,6 @@ function EcopontosPage() {
                 </tr>
               )}
               {lista.map((ep, i) => {
-                const cfg = nivelConfig[ep.nivel]
                 return (
                   <tr key={ep.id} className={`border-b border-border/50 hover:bg-muted/20 transition-colors ${!ep.ativo ? 'opacity-50' : ''} ${i % 2 === 0 ? '' : 'bg-muted/10'}`}>
                     <td className="px-4 py-3">
@@ -366,20 +373,29 @@ function EcopontosPage() {
                     </td>
                     <td className="px-4 py-3 text-xs text-foreground">{ep.zona ?? '—'}</td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2 min-w-[100px]">
-                        <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                          <div className="h-full rounded-full" style={{ width: `${ep.ocupacao}%`, backgroundColor: cfg.color }} />
-                        </div>
-                        <span className="text-[10px] font-medium" style={{ color: cfg.color }}>{ep.ocupacao}%</span>
+                      <div className="flex flex-col gap-1 min-w-[200px]">
+                        {ep.contentores?.map(c => (
+                          <div key={c.id} className="flex items-center gap-3 text-[10px]">
+                            <span className="font-semibold w-28 shrink-0">{c.tipo}</span>
+                            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                              <div className="h-full rounded-full bg-[var(--primary)]" style={{ width: `${c.ocupacao}%` }} />
+                            </div>
+                            <span>{c.ocupacao}%</span>
+                          </div>
+                        ))}
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className={`flex items-center gap-1 text-[10px] font-medium w-fit px-2 py-0.5 rounded-full ${ep.sensor_estado === 'online' ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' : 'text-muted-foreground bg-muted'}`}>
-                        {ep.sensor_estado === 'online' ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-                        {ep.sensor_estado === 'online' ? 'Online' : 'Offline'}
+                      <div className="flex flex-col gap-1 text-[10px] font-medium">
+                        {ep.contentores?.map(c => (
+                           <div key={c.id} className={`flex items-center gap-1 w-fit px-2 py-0.5 rounded-full ${c.sensor_estado === 'online' ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' : 'text-muted-foreground bg-muted'}`}>
+                             {c.sensor_estado === 'online' ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+                             {c.sensor_estado === 'online' ? 'Online' : 'Offline'}
+                           </div>
+                        ))}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">{ep.ultima_recolha ?? '—'}</td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">{ep.contentores?.[0]?.ultima_recolha ?? '—'}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
                         <button aria-label="Editar" title="Editar" onClick={() => abrirEditar(ep)} className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
@@ -442,9 +458,28 @@ function EcopontosPage() {
                   {errors.morada && <p className="text-xs text-destructive mt-1">{errors.morada.message}</p>}
                 </div>
                 <div className="col-span-2">
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Ocupação (%)</label>
-                  <input type="number" min={0} max={100} {...register('ocupacao', { valueAsNumber: true })}
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/30" />
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-xs font-medium text-muted-foreground block">Contentores</label>
+                    <Button type="button" variant="outline" size="sm" onClick={() => append({ tipo: 'Papel', ocupacao: 0 })} className="h-6 px-2 text-[10px]">
+                      + Adicionar
+                    </Button>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {fields.map((field, index) => (
+                      <div key={field.id} className="flex gap-2 items-center border border-border p-2 rounded-xl">
+                        <select {...register(`contentores.${index}.tipo`)} className="w-1/2 px-2 py-1 text-sm rounded border border-border bg-background text-foreground">
+                          <option value="Papel">Papel / Azul</option>
+                          <option value="Plastico">Plástico / Amarelo</option>
+                          <option value="Vidro">Vidro / Verde</option>
+                          <option value="Indiferenciado">Indiferenciado / Preto</option>
+                        </select>
+                        <input type="number" min={0} max={100} {...register(`contentores.${index}.ocupacao`, { valueAsNumber: true })} placeholder="%" className="w-1/3 px-2 py-1 text-sm rounded border border-border bg-background text-foreground" />
+                        <button type="button" onClick={() => remove(index)} className="text-destructive hover:text-destructive/80 p-1">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div className="col-span-2">
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">

@@ -25,6 +25,7 @@ export function PaginationBar({ page, pageCount, onPage }: PaginationBarProps) {
       <button
         onClick={() => onPage(page - 1)}
         disabled={page === 1}
+        aria-label="Página anterior"
         className="p-1.5 rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
       >
         <ChevronLeft className="w-4 h-4" />
@@ -49,6 +50,7 @@ export function PaginationBar({ page, pageCount, onPage }: PaginationBarProps) {
       <button
         onClick={() => onPage(page + 1)}
         disabled={page === pageCount}
+        aria-label="Página seguinte"
         className="p-1.5 rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
       >
         <ChevronRight className="w-4 h-4" />

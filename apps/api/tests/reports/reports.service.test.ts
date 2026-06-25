@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { ReportStatus } from '@prisma/client';
@@ -420,6 +420,49 @@ export const reportsServiceTests: TestCase[] = [
         status: 'resolvido',
       });
       assert.equal(s3.report.status, 'resolvido');
+    },
+  },
+  {
+    name: 'owner cancels a pending report',
+    run: async () => {
+      const id = '00000000-0000-0000-0000-000000000011';
+      const service = new ReportsService(
+        new FakePrismaService([buildReport({ id, userId: 'user-1' })]) as never,
+      );
+
+      const result = await service.cancelOwnReport('user-1', 'CIDADAO', id);
+
+      assert.equal(result.report.status, 'cancelado');
+    },
+  },
+  {
+    name: 'citizen cannot cancel another users report',
+    run: async () => {
+      const id = '00000000-0000-0000-0000-000000000012';
+      const service = new ReportsService(
+        new FakePrismaService([buildReport({ id, userId: 'user-2' })]) as never,
+      );
+
+      await assert.rejects(
+        () => service.cancelOwnReport('user-1', 'CIDADAO', id),
+        (error: Error) => error instanceof NotFoundException,
+      );
+    },
+  },
+  {
+    name: 'citizen cannot cancel a report after triage',
+    run: async () => {
+      const id = '00000000-0000-0000-0000-000000000013';
+      const service = new ReportsService(
+        new FakePrismaService([
+          buildReport({ id, userId: 'user-1', status: ReportStatus.ANALISE }),
+        ]) as never,
+      );
+
+      await assert.rejects(
+        () => service.cancelOwnReport('user-1', 'CIDADAO', id),
+        (error: Error) => error instanceof ConflictException,
+      );
     },
   },
 ];

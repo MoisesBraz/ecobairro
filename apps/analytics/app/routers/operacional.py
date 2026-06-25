@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
@@ -10,6 +11,8 @@ from ..cache import cache_key, get_cached, set_cached
 from ..config import get_settings
 from ..db import get_pool
 from ..routing import distancia_label, duracao_label, greedy_route, osrm_trip
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/operacional", tags=["operacional"])
 
@@ -23,18 +26,27 @@ _FAIXA_ALTO = 80
 _FAIXA_MEDIO = 50
 
 # Pontos do heatmap — enchimento por ecoponto. ST_X/ST_Y extraem lng/lat da geom PostGIS.
+# O enchimento/estado vivem nos contentores (1 ecoponto → N contentores em níveis
+# diferentes): a ocupação do ecoponto é o MAX dos contentores e o estado é o pior
+# (offline > alerta > online), igual à lógica de nível do NestJS (`computeNivel`).
 _PONTOS_SQL = """
-    SELECT id::text AS id,
-           nome,
-           COALESCE(zona, 'Sem zona') AS zona,
-           ocupacao,
-           sensor_estado,
-           ST_Y(geom) AS lat,
-           ST_X(geom) AS lng
-    FROM ecopontos
-    WHERE ativo = true
-      AND geom IS NOT NULL
-      AND (%(zona)s::text IS NULL OR zona = %(zona)s::text)
+    SELECT e.id::text AS id,
+           e.nome,
+           COALESCE(e.zona, 'Sem zona') AS zona,
+           COALESCE(MAX(c.ocupacao), 0) AS ocupacao,
+           CASE
+               WHEN bool_or(c.sensor_estado = 'offline') THEN 'offline'
+               WHEN bool_or(c.sensor_estado = 'alerta')  THEN 'alerta'
+               ELSE 'online'
+           END AS sensor_estado,
+           ST_Y(e.geom) AS lat,
+           ST_X(e.geom) AS lng
+    FROM ecopontos e
+    LEFT JOIN contentores c ON c.ecoponto_id = e.id
+    WHERE e.ativo = true
+      AND e.geom IS NOT NULL
+      AND (%(zona)s::text IS NULL OR e.zona = %(zona)s::text)
+    GROUP BY e.id
     ORDER BY ocupacao DESC
 """
 
@@ -118,23 +130,31 @@ def heatmap(
 # do sensor: offline (não confiável, precisa de visita) e alerta pesam mais. O score e a
 # ordenação são feitos na BD (ORDER BY + LIMIT) para não trazer ecopontos a mais.
 #   score = ocupacao + peso(sensor_estado)
+# Enchimento/estado agregados dos contentores (MAX da ocupação, pior estado, pior
+# bateria); o score de urgência usa esses agregados.
 _FILA_SQL = """
-    SELECT id::text AS id,
-           nome,
-           COALESCE(zona, 'Sem zona') AS zona,
-           ocupacao,
-           sensor_estado,
-           bateria,
-           ST_Y(geom) AS lat,
-           ST_X(geom) AS lng,
-           (ocupacao + CASE sensor_estado
-                         WHEN 'offline' THEN 40
-                         WHEN 'alerta'  THEN 20
+    SELECT e.id::text AS id,
+           e.nome,
+           COALESCE(e.zona, 'Sem zona') AS zona,
+           COALESCE(MAX(c.ocupacao), 0) AS ocupacao,
+           CASE
+               WHEN bool_or(c.sensor_estado = 'offline') THEN 'offline'
+               WHEN bool_or(c.sensor_estado = 'alerta')  THEN 'alerta'
+               ELSE 'online'
+           END AS sensor_estado,
+           MIN(c.bateria) AS bateria,
+           ST_Y(e.geom) AS lat,
+           ST_X(e.geom) AS lng,
+           (COALESCE(MAX(c.ocupacao), 0) + CASE
+                         WHEN bool_or(c.sensor_estado = 'offline') THEN 40
+                         WHEN bool_or(c.sensor_estado = 'alerta')  THEN 20
                          ELSE 0
                        END) AS score_prioridade
-    FROM ecopontos
-    WHERE ativo = true
-      AND (%(zona)s::text IS NULL OR zona = %(zona)s::text)
+    FROM ecopontos e
+    LEFT JOIN contentores c ON c.ecoponto_id = e.id
+    WHERE e.ativo = true
+      AND (%(zona)s::text IS NULL OR e.zona = %(zona)s::text)
+    GROUP BY e.id
     ORDER BY score_prioridade DESC, ocupacao DESC, nome ASC
     LIMIT %(limit)s
 """
@@ -189,24 +209,44 @@ def fila_prioridades(
 # OP4 — sugestão de rota de recolha (RF-05). Seleciona, por zona, os ecopontos que
 # precisam de visita (mesmo score de urgência da fila OP3) e resolve a ordem de visita
 # por estradas (OSRM /trip). Sem telemetria, "precisa de recolha" = enchimento acima do
-# limiar OU sensor offline/alerta. Cap de pontos para o /trip ser rápido e exato.
+# limiar OU sensor offline/alerta. O enchimento/estado de cada ecoponto derivam dos seus
+# contentores (MAX da ocupação, pior estado) — um ecoponto entra na rota se o contentor
+# mais cheio passar o limiar. Cap de pontos para o /trip ser rápido e exato.
 _ROTA_MAX_PONTOS = 12
 _ROTA_SQL = """
+    WITH agg AS (
+        SELECT e.id,
+               e.nome,
+               COALESCE(MAX(c.ocupacao), 0) AS ocupacao,
+               CASE
+                   WHEN bool_or(c.sensor_estado = 'offline') THEN 'offline'
+                   WHEN bool_or(c.sensor_estado = 'alerta')  THEN 'alerta'
+                   ELSE 'online'
+               END AS sensor_estado,
+               json_agg(json_build_object('tipo', c.tipo, 'ocupacao', c.ocupacao))
+                   FILTER (WHERE c.id IS NOT NULL) AS contentores,
+               ST_Y(e.geom) AS lat,
+               ST_X(e.geom) AS lng
+        FROM ecopontos e
+        LEFT JOIN contentores c ON c.ecoponto_id = e.id
+        WHERE e.ativo = true
+          AND e.geom IS NOT NULL
+          AND (%(zona)s::text IS NULL OR e.zona = %(zona)s::text)
+        GROUP BY e.id
+    )
     SELECT id::text AS id,
            nome,
            ocupacao,
-           ST_Y(geom) AS lat,
-           ST_X(geom) AS lng,
+           lat,
+           lng,
+           contentores,
            (ocupacao + CASE sensor_estado
                          WHEN 'offline' THEN 40
                          WHEN 'alerta'  THEN 20
                          ELSE 0
                        END) AS score_prioridade
-    FROM ecopontos
-    WHERE ativo = true
-      AND geom IS NOT NULL
-      AND (%(zona)s::text IS NULL OR zona = %(zona)s::text)
-      AND (ocupacao >= %(limiar)s OR sensor_estado IN ('offline', 'alerta'))
+    FROM agg
+    WHERE ocupacao >= %(limiar)s OR sensor_estado IN ('offline', 'alerta')
     ORDER BY score_prioridade DESC, ocupacao DESC, nome ASC
     LIMIT %(limit)s
 """
@@ -255,6 +295,11 @@ def rota_sugestao(
         coords, base_url=settings.osrm_base_url, source_first=veiculo is not None
     )
     if result is None:
+        logger.warning(
+            "OSRM indisponível (%s); a recorrer ao fallback greedy (linhas retas) p/ %d pontos",
+            settings.osrm_base_url,
+            len(coords),
+        )
         result = greedy_route(coords, source_first=veiculo is not None)
 
     # Reconstruir as paragens (só ecopontos) pela ordem de visita; o índice do veículo
@@ -272,6 +317,10 @@ def rota_sugestao(
                 "lng": float(r["lng"]),
                 "ocupacao": int(r["ocupacao"]),
                 "ordem": len(paragens) + 1,
+                "contentores": [
+                    {"tipo": c["tipo"], "ocupacao": int(c["ocupacao"])}
+                    for c in (r["contentores"] or [])
+                ],
             }
         )
 

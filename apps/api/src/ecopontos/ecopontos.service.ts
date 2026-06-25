@@ -16,10 +16,12 @@ import { isWithinAveiro } from '../common/geo';
 import { badRequest, forbidden, notFound } from '../common/errors';
 import { parsePagination } from '../common/pagination';
 
-function computeNivel(ocupacao: number): EcopontoNivel {
-  if (ocupacao >= 95) return 'cheio';
-  if (ocupacao >= 80) return 'alto';
-  if (ocupacao >= 50) return 'medio';
+function computeNivel(contentores: { ocupacao: number }[]): EcopontoNivel {
+  if (!contentores || contentores.length === 0) return 'baixo';
+  const maxOcupacao = Math.max(...contentores.map(c => c.ocupacao));
+  if (maxOcupacao >= 95) return 'cheio';
+  if (maxOcupacao >= 80) return 'alto';
+  if (maxOcupacao >= 50) return 'medio';
   return 'baixo';
 }
 
@@ -66,27 +68,8 @@ function assertDentroAveiro(lat: number, lng: number): void {
   }
 }
 
-function mapRow(row: {
-  id: string;
-  nome: string;
-  codigo: string | null;
-  morada: string;
-  codigoPostal: string | null;
-  zona: string | null;
-  distanciaLabel: string;
-  ocupacao: number;
-  tipos: unknown;
-  sensorEstado: string;
-  ultimaRecolha: string | null;
-  ultimaAtualizacao: string | null;
-  lat: number;
-  lng: number;
-  bateria: number | null;
-  temperatura: number | null;
-  ativo: boolean;
-  ordem: number;
-}): EcopontoRecord {
-  const tipos = Array.isArray(row.tipos) ? (row.tipos as string[]) : [];
+function mapRow(row: any): EcopontoRecord {
+  const contentores = row.contentores || [];
   return {
     id: row.id,
     nome: row.nome,
@@ -95,15 +78,19 @@ function mapRow(row: {
     codigo_postal: row.codigoPostal,
     zona: row.zona,
     distancia_label: row.distanciaLabel,
-    ocupacao: row.ocupacao,
-    nivel: computeNivel(row.ocupacao),
-    tipos,
-    sensor_estado: row.sensorEstado as EcopontoSensor,
-    ultima_recolha: row.ultimaRecolha,
+    nivel: computeNivel(contentores),
+    contentores: contentores.map((c: any) => ({
+      id: c.id,
+      ecopontoId: c.ecopontoId,
+      tipo: c.tipo,
+      ocupacao: c.ocupacao,
+      sensor_estado: c.sensorEstado as EcopontoSensor,
+      bateria: c.bateria,
+      ultima_recolha: c.ultimaRecolha
+    })),
     ultima_atualizacao: row.ultimaAtualizacao,
     lat: row.lat,
     lng: row.lng,
-    bateria: row.bateria,
     temperatura: row.temperatura,
     ativo: row.ativo,
     ordem: row.ordem,
@@ -144,8 +131,20 @@ export class EcopontosService {
 
     // tipo (array JSON) e nível (computado de ocupacao) vão para o `where` para
     // que a paginação por BD seja exacta (contagem/skip/take corretos).
-    if (tipo) where['tipos'] = { array_contains: tipo };
-    if (nivel) where['ocupacao'] = nivelToOcupacao(nivel);
+    if (tipo) {
+      where['contentores'] = { ...where['contentores'] as any, some: { ...((where['contentores'] as any)?.some || {}), tipo: { contains: tipo, mode: Prisma.QueryMode.insensitive } } };
+    }
+    if (nivel) {
+      if (nivel === 'cheio') {
+        where['contentores'] = { ...where['contentores'] as any, some: { ...((where['contentores'] as any)?.some || {}), ocupacao: { gte: 95 } } };
+      } else if (nivel === 'alto') {
+        where['contentores'] = { ...where['contentores'] as any, some: { ...((where['contentores'] as any)?.some || {}), ocupacao: { gte: 80, lt: 95 } }, none: { ocupacao: { gte: 95 } } };
+      } else if (nivel === 'medio') {
+        where['contentores'] = { ...where['contentores'] as any, some: { ...((where['contentores'] as any)?.some || {}), ocupacao: { gte: 50, lt: 80 } }, none: { ocupacao: { gte: 80 } } };
+      } else if (nivel === 'baixo') {
+        where['contentores'] = { ...where['contentores'] as any, none: { ocupacao: { gte: 50 } } };
+      }
+    }
 
     // Paginação opt-in: só quando `page` é fornecido. As vistas de mapa/agregação
     // (zonas, mapa-sensores, home) não enviam `page` e continuam a receber tudo.
@@ -154,6 +153,7 @@ export class EcopontosService {
     if (!paginar) {
       const rows = await this.prisma.ecoponto.findMany({
         where,
+        include: { contentores: true },
         orderBy: { ordem: 'asc' },
       });
       const ecopontos = rows.map(mapRow);
@@ -166,6 +166,7 @@ export class EcopontosService {
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.ecoponto.findMany({
         where,
+        include: { contentores: true },
         orderBy: { ordem: 'asc' },
         skip,
         take: pageSize,
@@ -213,14 +214,21 @@ export class EcopontosService {
         codigo: input.codigo ?? null,
         morada: input.morada,
         zona,
-        ocupacao: input.ocupacao,
-        tipos: input.tipos ?? [],
-        sensorEstado: input.sensor_estado ?? 'online',
-        ultimaRecolha: input.ultima_recolha ?? null,
         lat: input.lat,
         lng: input.lng,
+        temperatura: input.temperatura ?? null,
         ordem: input.ordem ?? 0,
+        contentores: {
+          create: input.contentores?.map(c => ({
+            tipo: c.tipo,
+            ocupacao: c.ocupacao,
+            sensorEstado: c.sensor_estado ?? 'online',
+            bateria: c.bateria ?? null,
+            ultimaRecolha: c.ultima_recolha ?? null
+          })) || []
+        }
       },
+      include: { contentores: true }
     });
     return mapRow(row);
   }
@@ -254,6 +262,20 @@ export class EcopontosService {
     }
 
     try {
+      let contentoresData: Prisma.ContentorUpdateManyWithoutEcopontoNestedInput | undefined = undefined;
+      if (input.contentores) {
+        contentoresData = {
+          deleteMany: {},
+          create: input.contentores.map(c => ({
+            tipo: c.tipo || 'Desconhecido',
+            ocupacao: c.ocupacao || 0,
+            sensorEstado: c.sensor_estado ?? 'online',
+            bateria: c.bateria ?? null,
+            ultimaRecolha: c.ultima_recolha ?? null
+          }))
+        };
+      }
+
       const row = await this.prisma.ecoponto.update({
         where: { id },
         data: {
@@ -261,15 +283,14 @@ export class EcopontosService {
           ...(input.codigo !== undefined && { codigo: input.codigo }),
           ...(input.morada !== undefined && { morada: input.morada }),
           ...zonaUpdate,
-          ...(input.ocupacao !== undefined && { ocupacao: input.ocupacao }),
-          ...(input.tipos !== undefined && { tipos: input.tipos }),
-          ...(input.sensor_estado !== undefined && { sensorEstado: input.sensor_estado }),
-          ...(input.ultima_recolha !== undefined && { ultimaRecolha: input.ultima_recolha }),
           ...(input.lat !== undefined && { lat: input.lat }),
           ...(input.lng !== undefined && { lng: input.lng }),
+          ...(input.temperatura !== undefined && { temperatura: input.temperatura }),
           ...(input.ativo !== undefined && { ativo: input.ativo }),
           ...(input.ordem !== undefined && { ordem: input.ordem }),
+          ...(contentoresData && { contentores: contentoresData })
         },
+        include: { contentores: true }
       });
       return mapRow(row);
     } catch {

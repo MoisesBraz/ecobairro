@@ -94,6 +94,47 @@ export class SyncService {
   }
 
   /**
+   * Builds OSRM graphs for car, bike, and foot profiles.
+   */
+  async updateOSRM(): Promise<void> {
+    const dataDir = path.resolve(this.config.dataDir);
+    const volumeName = process.env.OSM_VOLUME_NAME || dataDir;
+    const pbfName = 'portugal-latest.osm.pbf';
+    
+    const profiles = ['car', 'bicycle', 'foot'];
+    
+    for (const profile of profiles) {
+      console.log(`Building OSRM graph for profile: ${profile}...`);
+      
+      // Copy the original pbf to a profile-specific name so OSRM outputs matching .osrm files
+      await fs.copyFile(
+        path.join(this.config.dataDir, pbfName),
+        path.join(this.config.dataDir, `${profile}.osm.pbf`)
+      );
+      
+      console.log(`Extracting ${profile}...`);
+      await this.execP(`docker run --rm -v "${volumeName}:/data" osrm/osrm-backend osrm-extract -p /opt/${profile}.lua /data/${profile}.osm.pbf`);
+      
+      console.log(`Partitioning ${profile}...`);
+      await this.execP(`docker run --rm -v "${volumeName}:/data" osrm/osrm-backend osrm-partition /data/${profile}.osrm`);
+      
+      console.log(`Customizing ${profile}...`);
+      await this.execP(`docker run --rm -v "${volumeName}:/data" osrm/osrm-backend osrm-customize /data/${profile}.osrm`);
+      
+      // Clean up the copied pbf to save space
+      await fs.unlink(path.join(this.config.dataDir, `${profile}.osm.pbf`));
+    }
+    
+    // Restart OSRM containers
+    console.log('Restarting OSRM containers...');
+    try {
+      await this.execP('docker restart ecobairro-osrm-car-1 ecobairro-osrm-bike-1 ecobairro-osrm-foot-1 || docker restart ecobairro-prod-osrm-car-1 ecobairro-prod-osrm-bike-1 ecobairro-prod-osrm-foot-1');
+    } catch (e) {
+      console.error('Failed to restart some OSRM containers. They may continue serving old data.', e);
+    }
+  }
+
+  /**
    * Renames the newly generated tiles file atomically to the final name
    * served by the tile server.
    */
@@ -165,6 +206,9 @@ export class SyncService {
 
     console.log('Publishing new map...');
     await this.publishTiles();
+
+    console.log('Generating OSRM routing graphs...');
+    await this.updateOSRM();
 
     console.log('Update complete!');
   }

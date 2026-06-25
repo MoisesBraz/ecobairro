@@ -1,0 +1,1 @@
+ALTER TYPE "ReportStatus" ADD VALUE 'CANCELADO';

@@ -1,39 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import MapGL, { Marker as MapLibreMarker, Source, Layer, NavigationControl, FullscreenControl } from 'react-map-gl/maplibre'
+import { Source, Layer } from 'react-map-gl/maplibre'
 import { X, Loader2, Navigation, Save, Calculator, Sparkles } from 'lucide-react'
-import 'maplibre-gl/dist/maplibre-gl.css'
 import { fetchJson } from '@/lib/http/fetch-json'
 import { getApiErrorMessage } from '@/lib/http/api-error'
 import { clientEnv } from '@/lib/env'
 import { getAccessToken } from '@/lib/auth'
-import { useMapStyle } from '@/lib/geo/use-map-style'
-import { MapStyleSwitcher } from '@/components/map-style-switcher'
-import { EcopontoPin } from '@/components/ui/ecoponto-pin'
+import { Mapa } from '@/components/mapa/mapa'
+import { RotaStopMarker } from '@/components/mapa/rota-stop-marker'
 import type {
   CreateRotaRequest,
   ListEcopontoZonasResponse,
   RotaRecord,
   RotaSugestaoResponse,
 } from '@ecobairro/contracts'
-
-function ParagemIcon({ n, children }: { n: number, children?: React.ReactNode }) {
-  return (
-    <div className="relative group cursor-pointer" style={{ transform: 'translate(-50%, -100%)' }}>
-      <EcopontoPin
-        tipos={['indiferenciado']}
-        ocupacao={0} // Unknown in modal planning, or we could pass if we had it
-        size={36}
-        label={n}
-        fallbackColor="#16a34a"
-      />
-      {children && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 w-max max-w-xs bg-popover text-popover-foreground text-xs rounded shadow-md border border-border p-2">
-          {children}
-        </div>
-      )}
-    </div>
-  )
-}
 
 function getPosition(): Promise<{ lat: number; lng: number }> {
   return new Promise((resolve, reject) => {
@@ -73,7 +52,6 @@ export function GerarRotaModal({ onClose, onSaved }: Props) {
   const [cor, setCor] = useState(COR_DEFAULT)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const { mapStyle, mapType, setMapType } = useMapStyle()
 
   useEffect(() => {
     void (async () => {
@@ -257,52 +235,36 @@ export function GerarRotaModal({ onClose, onSaved }: Props) {
               </span>
             </div>
 
-            <div className="h-[280px] w-full overflow-hidden rounded-xl border border-border relative">
-              {mapStyle && (
-                <MapGL
-                  initialViewState={{
-                    longitude: centro[1],
-                    latitude: centro[0],
-                    zoom: 13,
-                    pitch: 45,
-                  }}
-                  mapStyle={mapStyle}
-                  terrain={{ source: 'terrainSource', exaggeration: 1.5 }}
-                >
-                  <FullscreenControl position="top-right" />
-                  <NavigationControl position="top-right" visualizePitch={true} />
-                  <Source id="terrainSource" type="raster-dem" url="https://demotiles.maplibre.org/terrain-tiles/tiles.json" tileSize={256} />
-                  
-                  {sugestao.geometria.length > 0 && (
-                    <Source id="route-source" type="geojson" data={{
-                      type: 'Feature',
-                      properties: {},
-                      geometry: { type: 'LineString', coordinates: sugestao.geometria.map(([lat, lng]) => [lng, lat]) }
-                    }}>
-                      <Layer 
-                        id="route-layer" 
-                        type="line" 
-                        paint={{
-                          'line-color': cor,
-                          'line-width': 4,
-                          'line-opacity': 0.9,
-                        }} 
-                      />
-                    </Source>
-                  )}
-                  
-                  {sugestao.paragens.map((p) => (
-                    <MapLibreMarker key={p.id} longitude={p.lng} latitude={p.lat} anchor="center">
-                      <ParagemIcon n={p.ordem}>
-                        <p className="text-xs font-semibold">{p.ordem}. {p.nome}</p>
-                        <p className="text-[11px] text-muted-foreground">Enchimento: {p.ocupacao}%</p>
-                      </ParagemIcon>
-                    </MapLibreMarker>
-                  ))}
-                </MapGL>
+            <Mapa
+              className="h-[280px] w-full overflow-hidden rounded-xl border border-border relative"
+              center={{ lat: centro[0], lng: centro[1] }}
+              zoom={13}
+            >
+              {sugestao.geometria.length > 0 && (
+                <Source id="route-source" type="geojson" data={{
+                  type: 'Feature',
+                  properties: {},
+                  geometry: { type: 'LineString', coordinates: sugestao.geometria.map(([lat, lng]) => [lng, lat]) }
+                }}>
+                  <Layer
+                    id="route-layer"
+                    type="line"
+                    paint={{
+                      'line-color': cor,
+                      'line-width': 4,
+                      'line-opacity': 0.9,
+                    }}
+                  />
+                </Source>
               )}
-              <MapStyleSwitcher mapType={mapType} onChange={setMapType} />
-            </div>
+
+              {sugestao.paragens.map((p) => (
+                <RotaStopMarker key={p.id} longitude={p.lng} latitude={p.lat} label={p.ordem} ocupacao={p.ocupacao} contentores={p.contentores} fallbackColor={cor}>
+                  <p className="text-xs font-semibold">{p.ordem}. {p.nome}</p>
+                  <p className="text-[11px] text-muted-foreground">Enchimento: {p.ocupacao}%</p>
+                </RotaStopMarker>
+              ))}
+            </Mapa>
 
             <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
               <div>

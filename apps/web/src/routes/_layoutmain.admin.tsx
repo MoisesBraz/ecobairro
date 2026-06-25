@@ -99,7 +99,7 @@ const governanceAreas = [
   },
   {
     title: 'Analytics',
-    href: '/analytics',
+    href: '/kpis',
     icon: BarChart3,
     scope: 'RF-23',
     summary: 'KPIs por zona, resolução, volume de reports, atividade e indicadores de território.',

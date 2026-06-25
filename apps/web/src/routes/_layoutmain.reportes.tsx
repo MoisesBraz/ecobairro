@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useModalA11y } from '@/lib/use-modal-a11y'
-import { useForm } from 'react-hook-form'
+import { useForm, type FieldErrors } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { PaginationBar } from '@/components/ui/pagination-bar'
@@ -19,13 +19,18 @@ import { clientEnv } from '@/lib/env'
 import { getAccessToken, requireRole } from '@/lib/auth'
 import { fileToDataUrl } from '@/lib/image-upload'
 import { LocationPicker, type Coords } from '@/components/reportes/location-picker'
+import { ConfirmationModal } from '@/components/ui/confirmation-modal'
+import { focusFirstInvalidField } from '@/lib/focus-first-invalid-field'
 import type {
   CreateReportRequest,
   ListReportsResponse,
   ReportRecord,
   ReportStatsResponse,
-  ReportStatus,
   ReportsDuplicadosResponse,
+  CancelReportResponse,
+  EcopontoRecord,
+  ContentorRecord,
+  ReportStatus,
 } from '@ecobairro/contracts'
 
 interface ReportesSearch {
@@ -70,10 +75,11 @@ export const Route = createFileRoute('/_layoutmain/reportes')({
 type Status = ReportStatus
 
 const statusConfig: Record<Status, { label: string; color: string; bg: string; icon: React.ElementType }> = {
-  pendente:  { label: 'Pendente',   color: '#fb923c',              bg: 'bg-orange-50 dark:bg-orange-950/30',  icon: Clock       },
+  pendente:  { label: 'Pendente',   color: '#fbbf24',              bg: 'bg-amber-50 dark:bg-amber-950/30',    icon: Clock       },
   analise:   { label: 'Em Análise', color: '#60a5fa',              bg: 'bg-blue-50 dark:bg-blue-950/30',      icon: Loader      },
   resolvido: { label: 'Resolvido',  color: 'oklch(0.55 0.18 150)', bg: 'bg-emerald-50 dark:bg-emerald-950/30',icon: CheckCircle },
   rejeitado: { label: 'Rejeitado',  color: '#f87171',              bg: 'bg-red-50 dark:bg-red-950/30',        icon: XCircle     },
+  cancelado: { label: 'Cancelado',  color: '#f87171',              bg: 'bg-red-50 dark:bg-red-950/30',        icon: XCircle     },
 }
 
 const filtrosDef: { label: string; value: Status | 'todos' }[] = [
@@ -82,9 +88,15 @@ const filtrosDef: { label: string; value: Status | 'todos' }[] = [
   { label: 'Em Análise', value: 'analise'  },
   { label: 'Resolvido',  value: 'resolvido'},
   { label: 'Rejeitado',  value: 'rejeitado'},
+  { label: 'Cancelado',  value: 'cancelado'},
 ]
 
 const tiposReporte = ['Ecoponto Cheio', 'Deposição Ilegal', 'Dano em Equipamento', 'Odores', 'Vandalismo'] as const
+const contentorRequiredTypes = ['Ecoponto Cheio', 'Dano em Equipamento'] as const
+
+function isContentorRequiredType(tipo: (typeof tiposReporte)[number]): tipo is (typeof contentorRequiredTypes)[number] {
+  return (contentorRequiredTypes as readonly string[]).includes(tipo)
+}
 
 const novoReporteSchema = z.object({
   titulo:    z.string().min(3, 'Título obrigatório (mín. 3 caracteres)'),
@@ -127,6 +139,9 @@ function ReportesPage() {
   const [reportes, setReportes] = useState<ReportRecord[]>([])
   const [loading, setLoading]   = useState(true)
   const [listError, setListError] = useState<string | null>(null)
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
+  const [cancelTargetId, setCancelTargetId] = useState<string | null>(null)
+  const [cancelError, setCancelError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [modalAberto, setModalAberto] = useState(false)
@@ -140,6 +155,8 @@ function ReportesPage() {
 
   // Localização opcional (lat/lng) escolhida no mapa/pesquisa, fora do react-hook-form.
   const [coords, setCoords] = useState<Coords | null>(null)
+  const [selectedEcoponto, setSelectedEcoponto] = useState<EcopontoRecord | null>(null)
+  const [selectedContentor, setSelectedContentor] = useState<ContentorRecord | null>(null)
   // Aviso de duplicados (R8) — calculado quando há coords + tipo.
   const [dupes, setDupes] = useState<ReportsDuplicadosResponse | null>(null)
   const tipoWatch = watch('tipo')
@@ -218,7 +235,7 @@ function ReportesPage() {
   const pageCount = Math.ceil(total / pageSize)
 
   /* KPIs — carregados uma vez via endpoint agregado */
-  const [contagens, setContagens] = useState({ pendente: 0, analise: 0, resolvido: 0, rejeitado: 0 })
+  const [contagens, setContagens] = useState<Record<ReportStatus, number>>({ pendente: 0, analise: 0, resolvido: 0, rejeitado: 0, cancelado: 0 })
   const [totalGeral, setTotalGeral] = useState(0)
 
   const loadKpis = useCallback(async () => {
@@ -248,9 +265,30 @@ function ReportesPage() {
     setSubmitError(null)
     setCoords(null)
     setDupes(null)
+    setSelectedEcoponto(null)
+    setSelectedContentor(null)
     setModalAberto(true)
   }, [reset])
-  function fecharModal() { setModalAberto(false); setPreviewUrl(null); setSubmitError(null); setCoords(null); setDupes(null); reset() }
+  function fecharModal() { 
+    setModalAberto(false); 
+    setPreviewUrl(null); 
+    setSubmitError(null); 
+    setCoords(null); 
+    setDupes(null);
+    setSelectedEcoponto(null);
+    setSelectedContentor(null);
+    reset() 
+  }
+
+  // Reset ecoponto/contentor selections when report type changes
+  useEffect(() => {
+    if (tipoWatch) {
+      setSelectedEcoponto(null)
+      setSelectedContentor(null)
+      setCoords(null)
+      setValue('local', '')
+    }
+  }, [tipoWatch, setValue])
 
   /* ─ Auto-open via ?novo=1 (deep link da home ou do mapa) ─ */
   const autoOpenedRef = useRef(false)
@@ -265,6 +303,11 @@ function ReportesPage() {
   }, [search.novo, search.local, search.tipo, abrirModal])
 
   async function onSubmitReporte(data: NovoReporteForm) {
+    if (isContentorRequiredType(data.tipo) && !selectedContentor) {
+      setSubmitError('Selecione um contentor de ecoponto no mapa.')
+      focusFirstInvalidField(modalRef.current, ['local'])
+      return
+    }
     setSubmitting(true)
     setSubmitError(null)
     try {
@@ -275,6 +318,8 @@ function ReportesPage() {
         descricao: data.descricao,
         local: data.local,
         ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+        ...(selectedEcoponto ? { ecopontoId: selectedEcoponto.id } : {}),
+        ...(selectedContentor ? { contentorId: selectedContentor.id } : {}),
         ...(file ? { imagem: await fileToDataUrl(file) } : {}),
       }
       await fetchJson('/v1/reports', {
@@ -288,6 +333,33 @@ function ReportesPage() {
     } catch (err) {
       setSubmitError(getApiErrorMessage(err, 'Não foi possível submeter o reporte. Tente novamente.'))
     } finally { setSubmitting(false) }
+  }
+
+  function onInvalidReporte(formErrors: FieldErrors<NovoReporteForm>) {
+    const fieldOrder: (keyof NovoReporteForm)[] = ['titulo', 'tipo', 'local', 'descricao', 'imagem']
+    const firstInvalidField = fieldOrder.find(field => formErrors[field])
+    if (firstInvalidField) focusFirstInvalidField(modalRef.current, [firstInvalidField])
+  }
+
+  async function confirmCancelReporte() {
+    if (!cancelTargetId) return
+    const id = cancelTargetId
+    setCancellingId(id)
+    setCancelError(null)
+    try {
+      await fetchJson<CancelReportResponse>(`/v1/reports/${id}`, {
+        baseUrl: clientEnv.apiBaseUrl,
+        method: 'DELETE',
+        headers: authHeaders(),
+      })
+      await Promise.all([load(), loadKpis()])
+      setExpandido(null)
+      setCancelTargetId(null)
+    } catch (error) {
+      setCancelError(getApiErrorMessage(error, 'Não foi possível cancelar o reporte.'))
+    } finally {
+      setCancellingId(null)
+    }
   }
 
   return (
@@ -405,14 +477,18 @@ function ReportesPage() {
               return (
                 <Card
                   key={r.id}
-                  className="border border-border/70 shadow-sm rounded-xl hover:shadow-md transition-all cursor-pointer"
+                  className="border shadow-sm rounded-xl hover:shadow-md transition-all cursor-pointer overflow-hidden"
+                  style={{
+                    borderColor: `color-mix(in srgb, ${cfg.color} ${r.status === 'cancelado' ? '55%' : '30%'}, var(--border))`,
+                    backgroundColor: `color-mix(in srgb, ${cfg.color} ${r.status === 'cancelado' ? '8%' : '3%'}, var(--card))`,
+                  }}
                   onClick={() => setExpandido(isOpen ? null : r.id)}
                 >
                   <CardContent className="p-0">
                     <div className="flex items-start gap-4 p-4">
                       {r.imagem ? (
                         <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0 bg-muted">
-                          <img src={r.imagem} alt={`Fotografia do reporte ${r.titulo}`} className="w-full h-full object-cover" />
+                          <img src={r.imagem} alt={`Fotografia do reporte ${r.titulo}`} className={`w-full h-full object-cover ${r.status === 'cancelado' ? 'grayscale opacity-60' : ''}`} />
                         </div>
                       ) : (
                         <div className={`w-12 h-12 rounded-lg shrink-0 flex items-center justify-center ${cfg.bg}`}>
@@ -422,13 +498,13 @@ function ReportesPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <p className="text-sm font-semibold text-foreground leading-snug truncate pr-2">{r.titulo}</p>
+                            <p className={`text-sm font-semibold leading-snug truncate pr-2 ${r.status === 'cancelado' ? 'text-red-600 dark:text-red-400' : 'text-foreground'}`}>{r.titulo}</p>
                             <p className="text-[11px] text-muted-foreground mt-0.5">{r.tipo}</p>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             <div
                               className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium"
-                              style={{ color: cfg.color, backgroundColor: `color-mix(in srgb, ${cfg.color} 10%, transparent)` }}
+                              style={{ color: cfg.color, backgroundColor: `color-mix(in srgb, ${cfg.color} 14%, transparent)` }}
                             >
                               <Icon className="w-3 h-3" />
                               {cfg.label}
@@ -436,15 +512,42 @@ function ReportesPage() {
                             <ChevronRight className={`w-4 h-4 text-muted-foreground/50 transition-transform duration-200 ${isOpen ? 'rotate-90' : ''}`} />
                           </div>
                         </div>
-                        <div className="flex items-center gap-3 mt-2 text-[11px] text-muted-foreground">
-                          <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{r.local}</span>
-                          <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{formatDate(r.data)}</span>
-                        </div>
+                        <div className="flex flex-col gap-1 mt-2">
+          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+            <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{r.local}</span>
+            <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{formatDate(r.data)}</span>
+          </div>
+          {(r.ecopontoId || r.contentorId) && (
+            <div className="text-[10px] text-[var(--primary)] font-medium">
+              {r.ecopontoId && <span>Ecospot ID: {r.ecopontoId} </span>}
+              {r.contentorId && <span> | Contentor ID: {r.contentorId}</span>}
+            </div>
+          )}
+        </div>
                       </div>
                     </div>
                     {isOpen && (
-                      <div className={`px-4 pb-4 border-t border-border pt-3 ${cfg.bg}`}>
+                      <div className="px-4 pb-4 border-t border-border/60 bg-muted/20 pt-3">
                         <p className="text-sm text-foreground/80 leading-relaxed">{r.descricao}</p>
+                        {r.status === 'pendente' && (
+                          <div className="mt-4 flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row sm:items-center sm:justify-between" onClick={e => e.stopPropagation()}>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              disabled={cancellingId === r.id}
+                              onClick={() => {
+                                setCancelError(null)
+                                setCancelTargetId(r.id)
+                              }}
+                            >
+                              {cancellingId === r.id ? <Loader className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
+                              Cancelar reporte
+                            </Button>
+                            <span className="text-[10px] text-muted-foreground sm:text-right">
+                              Pode cancelar enquanto estiver pendente
+                            </span>
+                          </div>
+                        )}
                       </div>
                     )}
                   </CardContent>
@@ -469,15 +572,15 @@ function ReportesPage() {
               <h2 id="reportes-modal-title" className="text-base font-bold text-foreground">Novo Reporte</h2>
               <button type="button" aria-label="Fechar modal" onClick={fecharModal} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
             </div>
-            <form onSubmit={handleSubmit(onSubmitReporte)} className="flex flex-col gap-3">
-              <div>
+            <form onSubmit={handleSubmit(onSubmitReporte, onInvalidReporte)} className="flex flex-col gap-3">
+              <div data-field="titulo">
                 <label className="text-xs font-medium text-muted-foreground mb-1 block">Título</label>
                 <input type="text" {...register('titulo')} placeholder="Descreva brevemente o problema..."
                   className="w-full px-3 py-2 text-sm rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/30" />
                 {errors.titulo && <p className="text-xs text-destructive mt-1">{errors.titulo.message}</p>}
               </div>
 
-              <div>
+              <div data-field="tipo">
                 <label className="text-xs font-medium text-muted-foreground mb-1 block">Tipo de ocorrência</label>
                 <select {...register('tipo')}
                   className="w-full px-3 py-2 text-sm rounded-xl border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/30">
@@ -487,70 +590,92 @@ function ReportesPage() {
                 {errors.tipo && <p className="text-xs text-destructive mt-1">{errors.tipo.message}</p>}
               </div>
 
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Local</label>
-                <input type="text" {...register('local')} placeholder="Rua, Praça, Bairro..."
-                  className="w-full px-3 py-2 text-sm rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/30" />
-                {errors.local && <p className="text-xs text-destructive mt-1">{errors.local.message}</p>}
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">
-                  Localização no mapa <span className="text-muted-foreground/60 font-normal">(opcional — melhora a deteção de duplicados e a proximidade)</span>
-                </label>
-                <LocationPicker
-                  value={coords}
-                  onChange={setCoords}
-                  onAddress={(addr) => setValue('local', addr, { shouldValidate: true })}
-                />
-              </div>
-
-              {dupes?.duplicado && (
-                <div role="status" className="rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  <p className="font-semibold">Possível duplicado</p>
-                  <p className="mt-0.5">
-                    Já {dupes.candidatos.length === 1 ? 'existe 1 reporte parecido' : `existem ${dupes.candidatos.length} reportes parecidos`} perto desta localização (últimos 7 dias). Considere subscrever em vez de criar um novo.
-                  </p>
-                </div>
-              )}
-
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Descrição</label>
-                <textarea {...register('descricao')} rows={3} placeholder="Descreva o problema com mais detalhe..."
-                  className="w-full px-3 py-2 text-sm rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/30 resize-none" />
-                {errors.descricao && <p className="text-xs text-destructive mt-1">{errors.descricao.message}</p>}
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">
-                  Fotografia <span className="text-muted-foreground/60 font-normal">(opcional)</span>
-                </label>
-                {previewUrl ? (
-                  <div className="relative rounded-xl overflow-hidden border border-border">
-                    <img src={previewUrl} alt="Pré-visualização da fotografia do reporte" className="w-full h-40 object-cover" />
-                    <button
-                      type="button"
-                      aria-label="Remover fotografia"
-                      title="Remover fotografia"
-                      onClick={() => { reset({ ...getValues(), imagem: undefined as never }); setPreviewUrl(null) }}
-                      className="absolute top-2 right-2 w-7 h-7 bg-black/50 hover:bg-black/70 text-white rounded-full flex items-center justify-center transition-colors"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                    <div className="absolute bottom-2 left-2 bg-black/50 text-white text-[10px] px-2 py-0.5 rounded-full font-medium">
-                      {imagemFile?.name}
-                    </div>
+              {tipoWatch && (
+                <>
+                  <div data-field="local">
+                    {isContentorRequiredType(tipoWatch) ? (
+                      <>
+                        <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                          Selecione o contentor do ecoponto
+                        </label>
+                        <p className="text-[11px] text-muted-foreground mb-2">
+                          Clique diretamente no contentor (ex: papel, plástico, vidro) do ecoponto no mapa para reportar o problema.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                          Selecione o local no mapa
+                        </label>
+                        <p className="text-[11px] text-muted-foreground mb-2">
+                          Clique no mapa para colocar um pin no local onde pretende reportar o problema.
+                        </p>
+                      </>
+                    )}
+                    <LocationPicker
+                      value={coords}
+                      onChange={setCoords}
+                      onAddress={(addr) => setValue('local', addr, { shouldValidate: true })}
+                      onEcopontoSelect={setSelectedEcoponto}
+                      onContentorSelect={setSelectedContentor}
+                      onlyContentorSelection={isContentorRequiredType(tipoWatch)}
+                    />
+                    {/* Hidden local field, still required by schema */}
+                    <input type="hidden" {...register('local')} />
+                    {errors.local && <p className="text-xs text-destructive mt-1">{errors.local.message}</p>}
+                    {isContentorRequiredType(tipoWatch) && !selectedContentor && !errors.local && (
+                      <p className="text-xs text-destructive mt-1">Selecione um contentor de ecoponto no mapa.</p>
+                    )}
                   </div>
-                ) : (
-                  <label className="flex flex-col items-center justify-center h-32 border-2 border-dashed border-border rounded-xl cursor-pointer hover:border-[var(--primary)]/50 hover:bg-muted/30 transition-all">
-                    <Upload className="w-7 h-7 text-muted-foreground/40" />
-                    <p className="text-xs font-medium text-muted-foreground mt-2">Clique para selecionar imagem</p>
-                    <p className="text-[10px] text-muted-foreground/60 mt-0.5">JPG, PNG ou WebP · Máx. 5 MB</p>
-                    <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" {...register('imagem')} />
-                  </label>
-                )}
-                {errors.imagem && <p className="text-xs text-destructive mt-1">{errors.imagem.message as string}</p>}
-              </div>
+
+                  {dupes?.duplicado && (
+                    <div role="status" className="rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      <p className="font-semibold">Possível duplicado</p>
+                      <p className="mt-0.5">
+                        Já {dupes.candidatos.length === 1 ? 'existe 1 reporte parecido' : `existem ${dupes.candidatos.length} reportes parecidos`} perto desta localização (últimos 7 dias). Considere subscrever em vez de criar um novo.
+                      </p>
+                    </div>
+                  )}
+
+                  <div data-field="descricao">
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Descrição</label>
+                    <textarea {...register('descricao')} rows={3} placeholder="Descreva o problema com mais detalhe..."
+                      className="w-full px-3 py-2 text-sm rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[var(--primary)]/30 resize-none" />
+                    {errors.descricao && <p className="text-xs text-destructive mt-1">{errors.descricao.message}</p>}
+                  </div>
+
+                  <div data-field="imagem">
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                      Fotografia <span className="text-muted-foreground/60 font-normal">(opcional)</span>
+                    </label>
+                    {previewUrl ? (
+                      <div className="relative rounded-xl overflow-hidden border border-border">
+                        <img src={previewUrl} alt="Pré-visualização da fotografia do reporte" className="w-full h-40 object-cover" />
+                        <button
+                          type="button"
+                          aria-label="Remover fotografia"
+                          title="Remover fotografia"
+                          onClick={() => { reset({ ...getValues(), imagem: undefined as never }); setPreviewUrl(null) }}
+                          className="absolute top-2 right-2 w-7 h-7 bg-black/50 hover:bg-black/70 text-white rounded-full flex items-center justify-center transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                        <div className="absolute bottom-2 left-2 bg-black/50 text-white text-[10px] px-2 py-0.5 rounded-full font-medium">
+                          {imagemFile?.name}
+                        </div>
+                      </div>
+                    ) : (
+                      <label className="flex flex-col items-center justify-center h-32 border-2 border-dashed border-border rounded-xl cursor-pointer hover:border-[var(--primary)]/50 hover:bg-muted/30 transition-all">
+                        <Upload className="w-7 h-7 text-muted-foreground/40" />
+                        <p className="text-xs font-medium text-muted-foreground mt-2">Clique para selecionar imagem</p>
+                        <p className="text-[10px] text-muted-foreground/60 mt-0.5">JPG, PNG ou WebP · Máx. 5 MB</p>
+                        <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" {...register('imagem')} />
+                      </label>
+                    )}
+                    {errors.imagem && <p className="text-xs text-destructive mt-1">{errors.imagem.message as string}</p>}
+                  </div>
+                </>
+              )}
 
               {submitError && (
                 <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -569,6 +694,20 @@ function ReportesPage() {
           </div>
         </div>
       )}
+
+      <ConfirmationModal
+        open={cancelTargetId !== null}
+        title="Cancelar reporte?"
+        description="Esta ação irá cancelar o reporte. Não poderá voltar a colocá-lo como pendente."
+        confirmLabel="Cancelar reporte"
+        loading={cancellingId === cancelTargetId}
+        error={cancelError}
+        onClose={() => {
+          setCancelTargetId(null)
+          setCancelError(null)
+        }}
+        onConfirm={() => void confirmCancelReporte()}
+      />
     </div>
   )
 }

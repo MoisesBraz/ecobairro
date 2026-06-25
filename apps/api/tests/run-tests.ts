@@ -13,6 +13,7 @@ import { filaServiceTests } from './fila/fila.service.test';
 import { gamificationServiceTests } from './gamification/gamification.service.test';
 import { quizAdminServiceTests } from './gamification/quiz-admin.service.test';
 import { homeServiceTests } from './home/home.service.test';
+import { partilhasServiceTests } from './partilhas/partilhas.service.test';
 import { recolhasServiceTests } from './recolhas/recolhas.service.test';
 import { reportsServiceTests } from './reports/reports.service.test';
 import { rotasServiceTests } from './rotas/rotas.service.test';
@@ -34,6 +35,7 @@ async function main(): Promise<void> {
   failures += await runSuite('FilaService', filaServiceTests);
   failures += await runSuite('GamificationService', gamificationServiceTests);
   failures += await runSuite('QuizAdminService', quizAdminServiceTests);
+  failures += await runSuite('PartilhasService', partilhasServiceTests);
   failures += await runSuite('RecolhasService', recolhasServiceTests);
   failures += await runSuite('ReportsService', reportsServiceTests);
   failures += await runSuite('RotasService', rotasServiceTests);

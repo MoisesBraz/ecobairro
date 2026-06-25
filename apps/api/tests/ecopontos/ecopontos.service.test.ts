@@ -14,14 +14,10 @@ interface FakeEcopontoRow {
   morada: string;
   zona: string | null;
   distanciaLabel: string;
-  ocupacao: number;
-  tipos: unknown;
-  sensorEstado: string;
-  ultimaRecolha: string | null;
+  contentores: any[];
   ultimaAtualizacao: string | null;
   lat: number;
   lng: number;
-  bateria: number | null;
   temperatura: number | null;
   ativo: boolean;
   ordem: number;
@@ -38,20 +34,25 @@ class FakePrismaEcopontos {
   // Promise.all em vez de uma transação real — suficiente para os testes.
   $transaction = async <T>(ops: Promise<T>[]): Promise<T[]> => Promise.all(ops);
 
-  private applyWhere(where?: {
-    ativo?: boolean;
-    ocupacao?: { gte?: number; lt?: number };
-  }): FakeEcopontoRow[] {
+  private applyWhere(where?: any): FakeEcopontoRow[] {
     let rows = [...this.store];
     if (where?.ativo === true) rows = rows.filter((r) => r.ativo);
-    if (where?.ocupacao) {
-      const { gte, lt } = where.ocupacao;
-      rows = rows.filter(
-        (r) =>
-          (gte === undefined || r.ocupacao >= gte) &&
-          (lt === undefined || r.ocupacao < lt),
-      );
+    
+    if (where?.contentores?.some?.ocupacao) {
+      const op = where.contentores.some.ocupacao;
+      rows = rows.filter(r => r.contentores.some((c: any) => 
+        (op.gte === undefined || c.ocupacao >= op.gte) && 
+        (op.lt === undefined || c.ocupacao < op.lt)
+      ));
     }
+    if (where?.contentores?.none?.ocupacao) {
+      const op = where.contentores.none.ocupacao;
+      rows = rows.filter(r => !r.contentores.some((c: any) => 
+        (op.gte === undefined || c.ocupacao >= op.gte) && 
+        (op.lt === undefined || c.ocupacao < op.lt)
+      ));
+    }
+    
     return rows;
   }
 
@@ -81,19 +82,7 @@ class FakePrismaEcopontos {
       where?: { ativo?: boolean; ocupacao?: { gte?: number; lt?: number } };
     }) => this.applyWhere(args.where).length,
     create: async (args: {
-      data: {
-        nome: string;
-        codigo: string | null;
-        morada: string;
-        zona: string | null;
-        ocupacao: number;
-        tipos: unknown;
-        sensorEstado: string;
-        ultimaRecolha: string | null;
-        lat: number;
-        lng: number;
-        ordem: number;
-      };
+      data: any;
     }) => {
       const row: FakeEcopontoRow = {
         id: `eco-${this.nextId++}`,
@@ -102,15 +91,11 @@ class FakePrismaEcopontos {
         morada: args.data.morada,
         zona: args.data.zona,
         distanciaLabel: '',
-        ocupacao: args.data.ocupacao,
-        tipos: args.data.tipos,
-        sensorEstado: args.data.sensorEstado,
-        ultimaRecolha: args.data.ultimaRecolha,
+        contentores: args.data.contentores?.create || [],
         ultimaAtualizacao: null,
         lat: args.data.lat,
         lng: args.data.lng,
-        bateria: null,
-        temperatura: null,
+        temperatura: args.data.temperatura,
         ativo: true,
         ordem: args.data.ordem,
       };
@@ -123,13 +108,19 @@ class FakePrismaEcopontos {
     },
     update: async (args: {
       where: { id: string };
-      data: Partial<FakeEcopontoRow>;
+      data: any;
     }) => {
       const idx = this.store.findIndex((r) => r.id === args.where.id);
       if (idx < 0) {
         throw new Error('P2025');
       }
-      this.store[idx] = { ...this.store[idx]!, ...args.data };
+      
+      const updatedRow = { ...this.store[idx]!, ...args.data };
+      if (args.data.contentores?.create) {
+        updatedRow.contentores = args.data.contentores.create;
+      }
+      
+      this.store[idx] = updatedRow;
       return { ...this.store[idx]! };
     },
     updateMany: async (args: { where: { id: string }; data: { ativo: boolean } }) => {
@@ -143,7 +134,7 @@ class FakePrismaEcopontos {
   };
 }
 
-function baseRow(overrides: Partial<FakeEcopontoRow> = {}): FakeEcopontoRow {
+function baseRow(overrides: any = {}): FakeEcopontoRow {
   return {
     id: overrides.id ?? 'eco-1',
     nome: overrides.nome ?? 'Teste',
@@ -151,14 +142,10 @@ function baseRow(overrides: Partial<FakeEcopontoRow> = {}): FakeEcopontoRow {
     morada: overrides.morada ?? 'Rua A',
     zona: overrides.zona ?? 'Centro',
     distanciaLabel: '',
-    ocupacao: overrides.ocupacao ?? 30,
-    tipos: overrides.tipos ?? ['Papel'],
-    sensorEstado: overrides.sensorEstado ?? 'online',
-    ultimaRecolha: null,
+    contentores: overrides.contentores ?? [{ ocupacao: overrides.ocupacao ?? 30 }],
     ultimaAtualizacao: null,
     lat: 40.64,
     lng: -8.65,
-    bateria: overrides.bateria ?? 80,
     temperatura: overrides.temperatura ?? 14,
     ativo: overrides.ativo ?? true,
     ordem: overrides.ordem ?? 0,
@@ -209,7 +196,7 @@ export const ecopontosServiceTests: TestCase[] = [
     run: async () => {
       const prisma = new FakePrismaEcopontos([
         baseRow({ id: 'cheio', ocupacao: 96, ordem: 0 }),
-        baseRow({ id: 'baixo', ocupacao: 10, ordem: 1 }),
+        baseRow({ id: 'baixo', contentores: [{ tipo: 'Papel', contentores: [{ tipo: 'Papel', ocupacao: 10 }] }], ordem: 1 }),
         baseRow({ id: 'medio', ocupacao: 60, ordem: 2 }),
       ]);
       const service = new EcopontosService(prisma as never);
@@ -244,7 +231,7 @@ export const ecopontosServiceTests: TestCase[] = [
           service.create('CIDADAO', {
             nome: 'Novo',
             morada: 'Rua',
-            ocupacao: 10,
+            contentores: [{ tipo: 'Papel', ocupacao: 10 }],
             lat: 40,
             lng: -8,
           }),
@@ -260,14 +247,14 @@ export const ecopontosServiceTests: TestCase[] = [
       const row = await service.create('GESTOR', {
         nome: 'Novo EP',
         morada: 'Av. Teste',
-        ocupacao: 55,
+        contentores: [{ tipo: 'Vidro', ocupacao: 55 }],
         lat: 40.64,
         lng: -8.65,
-        tipos: ['Vidro'],
+        
       });
       assert.equal(row.nome, 'Novo EP');
       assert.equal(row.nivel, 'medio');
-      assert.equal(row.sensor_estado, 'online');
+      
     },
   },
   {
@@ -279,7 +266,7 @@ export const ecopontosServiceTests: TestCase[] = [
           service.create('GESTOR', {
             nome: 'Fora',
             morada: 'Lisboa',
-            ocupacao: 10,
+            contentores: [{ tipo: 'Papel', ocupacao: 10 }],
             lat: 38.72,
             lng: -9.14,
           }),
@@ -290,9 +277,9 @@ export const ecopontosServiceTests: TestCase[] = [
   {
     name: 'updates ecoponto ocupacao and reflects nivel',
     run: async () => {
-      const prisma = new FakePrismaEcopontos([baseRow({ id: 'x', ocupacao: 20 })]);
+      const prisma = new FakePrismaEcopontos([baseRow({ id: 'x', contentores: [{ tipo: 'Indiferenciado', ocupacao: 20 }] })]);
       const service = new EcopontosService(prisma as never);
-      const row = await service.update('ADMIN', 'x', { ocupacao: 90 });
+      const row = await service.update('ADMIN', 'x', { contentores: [{ tipo: 'Plastico', ocupacao: 90 }] });
       assert.equal(row.nivel, 'alto');
     },
   },

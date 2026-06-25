@@ -56,12 +56,19 @@ function MapaSensoresPage() {
       .finally(() => setLoading(false))
   }, [headers])
 
-  const lista = ecopontos.filter(s => filtroEstado === 'todos' || s.sensor_estado === filtroEstado)
+  const getSensorEstado = (s: EcopontoRecord): SensorEstado => {
+    if (!s.contentores || s.contentores.length === 0) return 'offline'
+    if (s.contentores.some(c => c.sensor_estado === 'alerta')) return 'alerta'
+    if (s.contentores.some(c => c.sensor_estado === 'offline')) return 'offline'
+    return 'online'
+  }
+
+  const lista = ecopontos.filter(s => filtroEstado === 'todos' || getSensorEstado(s) === filtroEstado)
 
   const counts = {
-    online:  ecopontos.filter(s => s.sensor_estado === 'online').length,
-    alerta:  ecopontos.filter(s => s.sensor_estado === 'alerta').length,
-    offline: ecopontos.filter(s => s.sensor_estado === 'offline').length,
+    online:  ecopontos.filter(s => getSensorEstado(s) === 'online').length,
+    alerta:  ecopontos.filter(s => getSensorEstado(s) === 'alerta').length,
+    offline: ecopontos.filter(s => getSensorEstado(s) === 'offline').length,
   }
 
   if (loading) {
@@ -137,8 +144,7 @@ function MapaSensoresPage() {
                   anchor="bottom"
                 >
                   <EcopontoPin
-                    tipos={s.tipos}
-                    ocupacao={s.ocupacao}
+                    contentores={s.contentores}
                     size={36}
                     selected={s.id === selecionado?.id}
                     onClick={(e) => {
@@ -156,7 +162,10 @@ function MapaSensoresPage() {
 
         <div className="grid w-full gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 max-h-80 overflow-y-auto pr-1">
           {lista.map(s => {
-            const cfg = estadoConfig[s.sensor_estado]
+            const estado = getSensorEstado(s)
+            const cfg = estadoConfig[estado]
+            const maxOcupacao = s.contentores.length ? Math.max(...s.contentores.map(c => c.ocupacao)) : 0
+            const maxBateria = s.contentores.find(c => c.bateria != null)?.bateria
             return (
               <Card
                 key={s.id}
@@ -174,15 +183,15 @@ function MapaSensoresPage() {
                     </span>
                   </div>
                   <p className="text-[11px] text-muted-foreground truncate">{s.morada}</p>
-                  {s.sensor_estado !== 'offline' && s.bateria != null && (
+                  {estado !== 'offline' && (
                     <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground">
-                      <span className="flex items-center gap-1"><Battery className="w-3 h-3" />{s.bateria}%</span>
+                      {maxBateria != null && <span className="flex items-center gap-1"><Battery className="w-3 h-3" />{maxBateria}%</span>}
                       {s.temperatura != null && (
                         <span className="flex items-center gap-1"><Thermometer className="w-3 h-3" />{s.temperatura}°C</span>
                       )}
                       <span className="flex items-center gap-1">
-                        {s.ocupacao >= 80 ? <AlertTriangle className="w-3 h-3 text-amber-500" /> : <Wifi className="w-3 h-3" />}
-                        {s.ocupacao}%
+                        {maxOcupacao >= 80 ? <AlertTriangle className="w-3 h-3 text-amber-500" /> : <Wifi className="w-3 h-3" />}
+                        {maxOcupacao}%
                       </span>
                     </div>
                   )}
@@ -194,33 +203,38 @@ function MapaSensoresPage() {
         </div>
       </div>
 
-      {selecionado && selecionado.sensor_estado !== 'offline' && (
-        <Card className="border border-[var(--primary)]/30 shadow-sm rounded-xl">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold text-foreground">{selecionado.codigo ?? selecionado.nome} — {selecionado.morada}</h3>
-              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ color: estadoConfig[selecionado.sensor_estado].color, backgroundColor: `color-mix(in srgb, ${estadoConfig[selecionado.sensor_estado].color} 12%, transparent)` }}>
-                {estadoConfig[selecionado.sensor_estado].label}
-              </span>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              {[
-                { label: 'Bateria',     value: selecionado.bateria != null ? `${selecionado.bateria}%` : '—',           icon: Battery     },
-                { label: 'Temperatura', value: selecionado.temperatura != null ? `${selecionado.temperatura}°C` : '—',   icon: Thermometer },
-                { label: 'Enchimento',  value: `${selecionado.ocupacao}%`,                                               icon: Radio       },
-              ].map(({ label, value, icon: Icon }) => (
-                <div key={label} className="flex flex-col items-center gap-1 p-3 rounded-xl bg-muted/30">
-                  <Icon className="w-4 h-4 text-muted-foreground" />
-                  <p className="text-base font-bold text-foreground">{value}</p>
-                  <p className="text-[10px] text-muted-foreground">{label}</p>
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground mt-3">Última leitura: {selecionado.ultima_atualizacao ?? '—'}</p>
-          </CardContent>
-        </Card>
-      )}
-      {selecionado && selecionado.sensor_estado === 'offline' && (
+      {selecionado && getSensorEstado(selecionado) !== 'offline' && (() => {
+        const estado = getSensorEstado(selecionado);
+        const maxOcupacao = selecionado.contentores.length ? Math.max(...selecionado.contentores.map(c => c.ocupacao)) : 0;
+        const maxBateria = selecionado.contentores.find(c => c.bateria != null)?.bateria;
+        return (
+          <Card className="border border-[var(--primary)]/30 shadow-sm rounded-xl">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-foreground">{selecionado.codigo ?? selecionado.nome} — {selecionado.morada}</h3>
+                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ color: estadoConfig[estado].color, backgroundColor: `color-mix(in srgb, ${estadoConfig[estado].color} 12%, transparent)` }}>
+                  {estadoConfig[estado].label}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                {[
+                  { label: 'Bateria',     value: maxBateria != null ? `${maxBateria}%` : '—',           icon: Battery     },
+                  { label: 'Temperatura', value: selecionado.temperatura != null ? `${selecionado.temperatura}°C` : '—',   icon: Thermometer },
+                  { label: 'Enchimento',  value: `${maxOcupacao}%`,                                               icon: Radio       },
+                ].map(({ label, value, icon: Icon }) => (
+                  <div key={label} className="flex flex-col items-center gap-1 p-3 rounded-xl bg-muted/30">
+                    <Icon className="w-4 h-4 text-muted-foreground" />
+                    <p className="text-base font-bold text-foreground">{value}</p>
+                    <p className="text-[10px] text-muted-foreground">{label}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground mt-3">Última leitura: {selecionado.ultima_atualizacao ?? '—'}</p>
+            </CardContent>
+          </Card>
+        );
+      })()}
+      {selecionado && getSensorEstado(selecionado) === 'offline' && (
         <Card className="border border-destructive/30 bg-destructive/5 rounded-xl">
           <CardContent className="p-4 flex items-center gap-3">
             <WifiOff className="w-5 h-5 text-destructive shrink-0" />

@@ -19,13 +19,14 @@ O módulo divide-se principalmente no `RecolhasController`, que gere os pedidos 
 ```mermaid
 sequenceDiagram
     actor Utilizador
+    actor Staff as "Staff (Operador/Gestor/Admin)"
     participant Controller as "RecolhasController"
     participant Service as "RecolhasService"
     participant Prisma as "PrismaService"
     participant BD as "Base de Dados"
 
     Utilizador->>Controller: GET /recolhas (ListRecolhasDto)
-    Controller->>Service: list(userId, query)
+    Controller->>Service: list(userId, role, query)
     Service->>Prisma: $transaction(findMany, count)
     Prisma->>BD: Query SQL
     BD-->>Prisma: Resultados e Total
@@ -38,9 +39,19 @@ sequenceDiagram
     Service->>Prisma: recolha.create(...)
     Prisma->>BD: Insert SQL
     BD-->>Prisma: Novo Registo
-    Prisma-->>Service: Dados Brutos
-    Service-->>Controller: RecolhaRecord
-    Controller-->>Utilizador: JSON Response
+    Prisma-->>Service: RecolhaRecord
+    Controller-->>Utilizador: { recolha: RecolhaRecord }
+
+    Staff->>Controller: PATCH /recolhas/:id (UpdateRecolhaStatusDto)
+    Controller->>Service: updateStatus(role, id, dto)
+    Service->>Prisma: recolha.findUnique (estado atual)
+    Prisma-->>Service: { status }
+    Note over Service: validateTransition(from, to)<br/>400 se transição inválida
+    Service->>Prisma: recolha.update(status, dataPrevista?)
+    Prisma->>BD: UPDATE SQL
+    BD-->>Prisma: Registo atualizado
+    Prisma-->>Service: RecolhaRecord
+    Controller-->>Staff: { recolha: RecolhaRecord }
 ```
 
 > **Sources:** `apps/api/src/recolhas/recolhas.controller.ts:L26-L40`, `apps/api/src/recolhas/recolhas.service.ts:L56-L95`
@@ -67,6 +78,27 @@ Para efetuar um novo pedido, o cliente envia uma requisição `POST /recolhas`. 
 O controlador extrai automaticamente o `userId` do utilizador atualmente autenticado (`@CurrentUser()`), garantindo de forma segura que a recolha gerada fica intrinsecamente associada a essa conta, mitigando riscos de acesso indevido. O Prisma Service persiste a entidade e a resposta devolve o novo registo (convertido para `RecolhaRecord`). Para mais contexto da infraestrutura de modelos, consulte o `[[Database/Schema Overview]]`.
 
 > **Sources:** `apps/api/src/recolhas/recolhas.controller.ts:L34-L40`, `apps/api/src/recolhas/recolhas.service.ts:L84-L95`
+
+## Atualização de Estado (Staff)
+
+O endpoint `PATCH /recolhas/:id` permite ao staff (OPERADOR, GESTOR, ADMIN) transitar o estado de uma recolha. O cidadão não tem acesso — tentativas devolvem 403.
+
+**Corpo do pedido (`UpdateRecolhaStatusDto`):**
+- `status`: novo estado (`pendente` | `agendado` | `concluido`) — obrigatório.
+- `data_prevista`: data prevista no formato `DD/MM/AAAA` — opcional; `null` mantém o valor atual sem alteração.
+
+**Máquina de estados — transições válidas:**
+
+```
+pendente ──► agendado ──► concluido
+pendente ─────────────► concluido
+```
+
+Qualquer outra transição (ex.: `concluido → pendente`) é rejeitada com 400 (`VALIDATION_ERROR`).
+
+**Implementação:** O serviço faz primeiro um `findUnique` para obter o estado atual. Se a recolha não existir, devolve 404 antes de tentar o `update`. A função `validateTransition()` valida a máquina de estados. A resposta é `{ recolha: RecolhaRecord }` (alinhada com `UpdateRecolhaResponse`).
+
+> **Sources:** `apps/api/src/recolhas/recolhas.controller.ts:L46-L53`, `apps/api/src/recolhas/recolhas.service.ts:L104-L143`
 
 ---
 Vá para: `[[index]]`

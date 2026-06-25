@@ -64,10 +64,15 @@ export class HomeService {
         ? this.prisma.cidadaoEcopontoFavorito
             .findMany({
               where: { userId: user.userId, ecoponto: { ativo: true } },
-              include: { ecoponto: true },
+              include: { ecoponto: { include: { contentores: true } } },
               orderBy: { criadoEm: 'asc' },
             })
-            .then((rows) => rows.map((row) => row.ecoponto))
+            .then((rows) => rows.map((row) => ({
+               ...row.ecoponto,
+               ocupacao: row.ecoponto.contentores.length > 0 
+                  ? Math.max(...row.ecoponto.contentores.map((c) => c.ocupacao)) 
+                  : 0
+            })))
         : Promise.resolve([]),
       this.prisma.partilha.findMany({
         where:
@@ -135,7 +140,9 @@ export class HomeService {
         id: e.id,
         nome: e.nome,
         distancia: e.distanciaLabel,
-        ocupacao: e.ocupacao,
+        ocupacao: (e as any).ocupacao,
+        lat: e.lat,
+        lng: e.lng,
         map_url: e.mapTileUrl ?? '',
       })),
       partilhas: partilhas.map((p) => ({

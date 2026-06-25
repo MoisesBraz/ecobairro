@@ -18,7 +18,6 @@ import { CreateCampanhaDto } from './dto/create-campanha.dto';
 import { UpdateCampanhaDto } from './dto/update-campanha.dto';
 
 @Controller('campanhas')
-@UseGuards(JwtAuthGuard)
 export class CampanhasController {
   private readonly campanhas: CampanhasService;
   constructor(@Inject(CampanhasService) campanhas: CampanhasService) {
@@ -31,11 +30,13 @@ export class CampanhasController {
   }
 
   @Get()
+  @UseGuards(JwtAuthGuard)
   list(@CurrentUser() user: AuthenticatedUser, @Query() query: ListCampanhasDto) {
     return this.campanhas.list(user.role, query);
   }
 
   @Post()
+  @UseGuards(JwtAuthGuard)
   create(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateCampanhaDto,
@@ -44,6 +45,7 @@ export class CampanhasController {
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard)
   update(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,

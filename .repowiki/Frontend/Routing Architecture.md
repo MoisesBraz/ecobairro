@@ -59,7 +59,7 @@ graph TD
     LayoutMain --> Utilizadores["/utilizadores"]
     LayoutMain --> Ecopontos["/ecopontos"]
     LayoutMain --> Reportes["/reportes"]
-    LayoutMain --> Analytics["/analytics"]
+    LayoutMain --> Kpis["/kpis"]
     LayoutMain --> Outros["Outras rotas privadas (/rotas, /recolhas, etc.)"]
 ```
 

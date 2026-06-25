@@ -99,7 +99,9 @@ describe('NoticiasPage', () => {
     vi.mocked(fetchJson).mockReturnValue(new Promise(() => {}))
     render(<NoticiasPage />)
     
-    expect(screen.getByText(/carregar/i)).toBeInTheDocument()
+    // Loading now shows skeleton cards (animate-pulse) instead of a spinner
+    const skeletons = document.querySelectorAll('.animate-pulse')
+    expect(skeletons.length).toBeGreaterThan(0)
   })
 
   it('renders list of news correctly and highlights "destaque"', async () => {
@@ -110,9 +112,9 @@ describe('NoticiasPage', () => {
 
     render(<NoticiasPage />)
 
-    // Wait for loading to finish
+    // Wait for loading skeletons to disappear and data to appear
     await waitFor(() => {
-      expect(screen.queryByText(/carregar/i)).not.toBeInTheDocument()
+      expect(screen.getByText('Nova Reciclagem no Bairro')).toBeInTheDocument()
     })
 
     // Highlight article (n1)
@@ -171,7 +173,7 @@ describe('NoticiasPage', () => {
     })
 
     // Click next page
-    const nextBtn = screen.getAllByRole('button').find(b => b.querySelector('svg.lucide-chevron-right'))!
+    const nextBtn = screen.getByRole('button', { name: /página seguinte/i })
     await user.click(nextBtn)
 
     await waitFor(() => {

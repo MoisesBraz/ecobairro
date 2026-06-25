@@ -147,9 +147,9 @@ export function QuizPlay({ onClose }: QuizPlayProps) {
         {result && <QuizResult result={result} onClose={() => onClose(true)} />}
 
         {!loading && !error && !result && quiz && pergunta && (
-          <div className="space-y-6">
+          <div className="mt-6 space-y-6">
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3 pr-8">
                 <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                   Pergunta {current + 1} de {total}
                 </span>

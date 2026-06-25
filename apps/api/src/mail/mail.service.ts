@@ -11,7 +11,8 @@ export type MailTemplate =
   | 'welcome'
   | 'account-locked'
   | 'new-device-login'
-  | 'two-factor-code';
+  | 'two-factor-code'
+  | 'partilha-interesse';
 
 const TEMPLATES_DIR = join(__dirname, 'templates');
 
@@ -44,7 +45,7 @@ export class MailService {
       return;
     }
 
-    const vars = {
+    const rawVars: Record<string, string | number> = {
       ...options.variables,
       subject: options.subject,
       year: new Date().getFullYear(),
@@ -52,9 +53,15 @@ export class MailService {
       appBaseUrl: this.appBaseUrl,
     };
 
-    const innerHtml = this.render(`${template}.html`, vars);
-    const layout = this.render('layout.html', { ...vars, body: innerHtml });
-    const text = this.render(`${template}.txt`, vars);
+    // Escape all variables before HTML injection to prevent XSS via user-supplied values.
+    const htmlVars = Object.fromEntries(
+      Object.entries(rawVars).map(([k, v]) => [k, MailService.htmlEscape(String(v))]),
+    );
+
+    const innerHtml = this.render(`${template}.html`, htmlVars);
+    // body is already-rendered HTML — must NOT be escaped a second time.
+    const layout = this.render('layout.html', { ...htmlVars, body: innerHtml });
+    const text = this.render(`${template}.txt`, rawVars);
 
     await this.getMailer().sendMail({
       from: this.smtpFrom,
@@ -63,6 +70,15 @@ export class MailService {
       text,
       html: layout,
     });
+  }
+
+  private static htmlEscape(s: string): string {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   private render(file: string, vars: Record<string, string | number>): string {

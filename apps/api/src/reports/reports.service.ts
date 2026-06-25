@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Prisma, ReportStatus, UserRole } from '@prisma/client';
 import type {
   CreateReportRequest,
+  CancelReportResponse,
   CreateReportResponse,
   ListReportsQuery,
   ListReportsResponse,
@@ -14,13 +15,14 @@ import type {
 } from '@ecobairro/contracts';
 import { PrismaService } from '../database/prisma.service';
 import { isWithinAveiro } from '../common/geo';
-import { badRequest, forbidden, notFound } from '../common/errors';
+import { badRequest, conflict, forbidden, notFound } from '../common/errors';
 
 const REPORT_STATUS_MAP: Record<ContractReportStatus, ReportStatus> = {
   pendente: ReportStatus.PENDENTE,
   analise: ReportStatus.ANALISE,
   resolvido: ReportStatus.RESOLVIDO,
   rejeitado: ReportStatus.REJEITADO,
+  cancelado: ReportStatus.CANCELADO,
 };
 
 const DB_STATUS_MAP: Record<ReportStatus, ContractReportStatus> = {
@@ -28,6 +30,7 @@ const DB_STATUS_MAP: Record<ReportStatus, ContractReportStatus> = {
   ANALISE: 'analise',
   RESOLVIDO: 'resolvido',
   REJEITADO: 'rejeitado',
+  CANCELADO: 'cancelado',
 };
 
 @Injectable()
@@ -91,6 +94,37 @@ export class ReportsService {
   ): Promise<ListReportsResponse> {
     assertOperationalReader(role);
     return this.listReportsInternal({}, query);
+  }
+
+  async cancelOwnReport(
+    userId: string,
+    role: ContractUserRole,
+    reportId: string,
+  ): Promise<CancelReportResponse> {
+    assertCanSelfReport(role);
+
+    const current = await this.prisma.report.findUnique({
+      where: { id: reportId },
+      select: { userId: true, status: true },
+    });
+    if (!current || current.userId !== userId) {
+      throw notFound('REPORT_NOT_FOUND');
+    }
+    if (current.status !== ReportStatus.PENDENTE) {
+      throw conflict('CONFLICT', 'Só pode cancelar reportes pendentes.');
+    }
+
+    const result = await this.prisma.report.updateMany({
+      where: { id: reportId, userId, status: ReportStatus.PENDENTE },
+      data: { status: ReportStatus.CANCELADO },
+    });
+    if (result.count === 0) {
+      throw conflict('CONFLICT', 'O reporte já não está pendente.');
+    }
+
+    const updated = await this.prisma.report.findUnique({ where: { id: reportId } });
+    if (!updated) throw notFound('REPORT_NOT_FOUND');
+    return { report: mapReport(updated) };
   }
 
   async updateReportStatus(
@@ -164,7 +198,7 @@ export class ReportsService {
       }),
     ]);
 
-    const byStatus = { pendente: 0, analise: 0, resolvido: 0, rejeitado: 0 };
+    const byStatus = { pendente: 0, analise: 0, resolvido: 0, rejeitado: 0, cancelado: 0 };
     for (const group of statusGroups) {
       const key = DB_STATUS_MAP[group.status];
       byStatus[key] = group._count._all;

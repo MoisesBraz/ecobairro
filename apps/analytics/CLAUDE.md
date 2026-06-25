@@ -58,8 +58,10 @@ apps/analytics/
 - `DATABASE_URL` (obrigatória p/ `/ready` e queries) — mesmo Postgres do NestJS.
 - `JWT_ACCESS_SECRET` (default dev `dev-access-secret-change-me`).
 - `REDIS_URL` (opcional) — `redis://redis:6379/0` em compose.
-- `OSRM_BASE_URL` (OP4) — servidor OSRM para o cálculo de rotas; default público
-  `https://router.project-osrm.org`. Em produção, idealmente self-hosted.
+- `OSRM_BASE_URL` (OP4) — servidor OSRM para o cálculo de rotas; default dev
+  `http://osrm-car:5000` (self-hosted, grafo de Portugal construído pelo `osm-updater`).
+  Em produção, o `.env` da máquina define o valor. Se o OSRM estiver indisponível, a
+  rota cai no fallback greedy (linhas retas) e regista um `logger.warning`.
 
 ## Testes
 
@@ -88,8 +90,10 @@ GiST) e validam `ST_DWithin` contra dados reais. Precisam de daemon Docker.
   últimos 7 dias, devolve `{duplicado, candidatos}`).
 - **Feito (Heatmap OP2):** `GET /operacional/heatmap?zona=` (GESTOR/ADMIN) — pontos de
   enchimento por ecoponto (geom→lat/lng, `peso`=ocupacao/100, faixas baixo/medio/alto) +
-  `resumo` com `centro` (ST_Centroid(ST_Collect)) e `bbox` (ST_Extent). Lê dados reais de
-  `ecopontos.ocupacao/zona/sensor_estado` (sem telemetria; sem migração).
+  `resumo` com `centro` (ST_Centroid(ST_Collect)) e `bbox` (ST_Extent). Sem telemetria, o
+  enchimento/estado de cada ecoponto são **agregados dos `contentores`** (migração
+  `20260621213121_contentores`): `ocupacao` = `MAX(contentores.ocupacao)`, `sensor_estado` =
+  pior estado (offline > alerta > online). OP2/OP3/OP4 partilham esta agregação.
 - **Feito (Fila-prioridades OP3):** `GET /operacional/fila-prioridades?zona=&limit=`
   (GESTOR/ADMIN) — ecopontos ativos ordenados por urgência. Sem telemetria, o score deriva
   do enchimento + estado do sensor: `score = ocupacao + peso(sensor_estado)` (offline +40,

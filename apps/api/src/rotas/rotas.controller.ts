@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Inject,
   Param,
   ParseUUIDPipe,
@@ -41,5 +43,14 @@ export class RotasController {
     @Body() dto: UpdateRotaDto,
   ) {
     return this.rotas.update(id, dto, user);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  remove(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.rotas.remove(id, user);
   }
 }

@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Calendar, Clock, ChevronRight, Search, Newspaper, Loader, Plus, X, Megaphone, Gift, Image as ImageIcon } from 'lucide-react'
+import { Calendar, Clock, ChevronRight, Search, Newspaper, Loader, Plus, X, Megaphone, Gift, Image as ImageIcon, CheckCircle2 } from 'lucide-react'
 import { useState, useEffect, useCallback } from 'react'
 import { PaginationBar } from '@/components/ui/pagination-bar'
 import { useListQuery, parseAsString } from '@/lib/use-list-query'
@@ -35,9 +35,33 @@ function formatDate(iso: string) {
   })
 }
 
+/* ── Skeleton card ── */
+function SkeletonCard({ tall = false }: { tall?: boolean }) {
+  return (
+    <div className={`rounded-xl border border-border/60 bg-card overflow-hidden animate-pulse ${tall ? 'h-72' : 'h-52'}`}>
+      <div className={`w-full bg-muted ${tall ? 'h-44' : 'h-28'}`} />
+      <div className="p-4 space-y-2.5">
+        <div className="h-3 w-16 bg-muted rounded-full" />
+        <div className="h-4 w-3/4 bg-muted rounded-full" />
+        <div className="h-3 w-full bg-muted rounded-full" />
+        <div className="h-3 w-2/3 bg-muted rounded-full" />
+      </div>
+    </div>
+  )
+}
+
+/* ── Placeholder de imagem (quando notícia não tem imagem) ── */
+function NoImagePlaceholder({ tag }: { tag?: string }) {
+  return (
+    <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-muted/40">
+      <Newspaper className="w-8 h-8 text-muted-foreground/40" />
+      {tag && <span className="text-xs text-muted-foreground/60 font-medium">{tag}</span>}
+    </div>
+  )
+}
+
 function NoticiasPage() {
   const [filtro, setFiltro]     = useState<Filtro>('tudo')
-  // page + pesquisa vivem na URL (nuqs) — partilhável e preservado na recarga.
   const { params, setPage, setFilters, pageSize } = useListQuery(
     { q: parseAsString.withDefault('') },
     POR_PAGINA,
@@ -49,13 +73,17 @@ function NoticiasPage() {
   const [loading, setLoading]   = useState(true)
   const [listError, setListError] = useState<string | null>(null)
   const [campanhas, setCampanhas] = useState<CampanhaRecord[]>([])
+  const [successMsg, setSuccessMsg] = useState<string | null>(null)
 
   const { user } = Route.useRouteContext() as { user: { role: string } }
   const canCreate = ['ADMIN', 'GESTOR', 'OPERADOR', 'admin', 'gestor', 'operador'].includes(user.role)
 
+  const [noticiaAberta, setNoticiaAberta] = useState<NoticiaRecord | null>(null)
+
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [imgPreviewError, setImgPreviewError] = useState(false)
   const [formData, setFormData] = useState<CreateNoticiaRequest>({
     titulo: '',
     resumo: '',
@@ -66,7 +94,7 @@ function NoticiasPage() {
     tempo_leitura_min: 5,
   })
 
-  // Empurra a pesquisa para a URL com debounce (setFilters volta à página 1).
+  // Debounce pesquisa → URL
   useEffect(() => {
     if (busca === q) return
     const t = setTimeout(() => setFilters({ q: busca }), 350)
@@ -79,11 +107,9 @@ function NoticiasPage() {
     try {
       const reqParams: Record<string, string | number> = { page, pageSize }
       if (q.trim()) reqParams.q = q.trim()
-
       const resp = await fetchJson<ListNoticiasResponse>('/v1/noticias', {
         baseUrl: clientEnv.apiBaseUrl,
         params: reqParams,
-        // The endpoint could be public for GET, but adding the token is safe
         headers: { Authorization: `Bearer ${getAccessToken() ?? ''}` },
       })
       setNoticias(resp.noticias)
@@ -102,7 +128,21 @@ function NoticiasPage() {
     return () => window.clearTimeout(id)
   }, [load])
 
-  // Campanhas/benefícios publicados — carregados uma vez (não paginados).
+  // Escape fecha modal de leitura
+  useEffect(() => {
+    if (!noticiaAberta) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setNoticiaAberta(null) }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [noticiaAberta])
+
+  // Auto-esconder mensagem de sucesso
+  useEffect(() => {
+    if (!successMsg) return
+    const t = setTimeout(() => setSuccessMsg(null), 4000)
+    return () => clearTimeout(t)
+  }, [successMsg])
+
   useEffect(() => {
     fetchJson<{ campanhas: CampanhaRecord[] }>('/v1/campanhas/publicas', {
       baseUrl: clientEnv.apiBaseUrl,
@@ -113,7 +153,7 @@ function NoticiasPage() {
 
   const handleImageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    e.target.value = '' // permite reescolher o mesmo ficheiro
+    e.target.value = ''
     if (!file) return
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
       setCreateError('Formato não suportado (JPG, PNG ou WebP).')
@@ -126,6 +166,7 @@ function NoticiasPage() {
     try {
       const dataUrl = await fileToDataUrl(file)
       setFormData((prev) => ({ ...prev, imagem_url: dataUrl }))
+      setImgPreviewError(false)
       setCreateError(null)
     } catch {
       setCreateError('Não foi possível ler a imagem.')
@@ -144,9 +185,8 @@ function NoticiasPage() {
         headers: { Authorization: `Bearer ${getAccessToken() ?? ''}` },
       })
       setIsModalOpen(false)
-      setFormData({
-        titulo: '', resumo: '', conteudo: '', imagem_url: '', categoria: 'Geral', destaque: false, tempo_leitura_min: 5,
-      })
+      setFormData({ titulo: '', resumo: '', conteudo: '', imagem_url: '', categoria: 'Geral', destaque: false, tempo_leitura_min: 5 })
+      setSuccessMsg('Notícia publicada com sucesso!')
       void load()
     } catch (err) {
       setCreateError(getApiErrorMessage(err, 'Não foi possível criar a notícia.'))
@@ -172,8 +212,22 @@ function NoticiasPage() {
     (mostrarNoticias ? noticias.length === 0 : true) &&
     (mostrarCampanhas ? campanhasFiltradas.length === 0 : true)
 
+  // Contadores para pills
+  const countNoticias  = noticias.length
+  const countCampanhas = campanhasFiltradas.length
+  const countTudo      = countNoticias + countCampanhas
+
   return (
     <div className="flex flex-col gap-6 pb-10">
+
+      {/* ── Banner de sucesso ── */}
+      {successMsg && (
+        <div role="status" aria-live="polite" className="flex items-center gap-3 rounded-xl border border-[var(--primary)]/30 bg-[var(--primary)]/8 px-4 py-3 text-sm text-[var(--primary)] animate-in slide-in-from-top-2 duration-300">
+          <CheckCircle2 className="w-4 h-4 shrink-0" />
+          <span>{successMsg}</span>
+          <button onClick={() => setSuccessMsg(null)} className="ml-auto text-[var(--primary)]/60 hover:text-[var(--primary)]"><X className="w-4 h-4" /></button>
+        </div>
+      )}
 
       {listError && (
         <div role="alert" aria-live="polite" className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive flex items-center justify-between gap-3">
@@ -205,28 +259,40 @@ function NoticiasPage() {
         )}
       </div>
 
-      {/* ── Filtros ── */}
+      {/* ── Filtros com contadores ── */}
       <div className="flex gap-2">
-        {filtrosDef.map((f) => (
-          <button
-            key={f.value}
-            onClick={() => setFiltro(f.value)}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
-              filtro === f.value
-                ? 'bg-[var(--primary)] text-white shadow-sm'
-                : 'bg-card border border-border text-muted-foreground hover:border-[var(--primary)]/40 hover:text-foreground'
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
+        {filtrosDef.map((f) => {
+          const count = f.value === 'tudo' ? countTudo : f.value === 'noticias' ? countNoticias : countCampanhas
+          return (
+            <button
+              key={f.value}
+              onClick={() => setFiltro(f.value)}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all flex items-center gap-1.5 ${
+                filtro === f.value
+                  ? 'bg-[var(--primary)] text-white shadow-sm'
+                  : 'bg-card border border-border text-muted-foreground hover:border-[var(--primary)]/40 hover:text-foreground'
+              }`}
+            >
+              {f.label}
+              {!loading && count > 0 && (
+                <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${
+                  filtro === f.value ? 'bg-white/20 text-white' : 'bg-muted text-muted-foreground'
+                }`}>{count}</span>
+              )}
+            </button>
+          )
+        })}
       </div>
 
       {/* ── Conteúdo ── */}
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-20 gap-3">
-          <Loader className="w-6 h-6 text-muted-foreground animate-spin" />
-          <p className="text-sm text-muted-foreground">A carregar…</p>
+        <div className="space-y-6">
+          {/* Skeleton destaque */}
+          <SkeletonCard tall />
+          {/* Skeleton grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[1, 2, 3].map(i => <SkeletonCard key={i} />)}
+          </div>
         </div>
       ) : nadaParaMostrar ? (
         <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
@@ -240,101 +306,135 @@ function NoticiasPage() {
         </div>
       ) : (
         <div className="space-y-8">
-        {/* ── Campanhas & Benefícios ── */}
-        {mostrarCampanhas && campanhasFiltradas.length > 0 && (
-          <section className="space-y-3">
-            <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide flex items-center gap-2">
-              <Megaphone className="w-4 h-4 text-[var(--primary)]" /> Campanhas &amp; Benefícios
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {campanhasFiltradas.map((c) => (
-                <Card key={c.id} className="overflow-hidden border border-[var(--primary)]/30 bg-[var(--primary)]/[0.04] shadow-none hover:shadow-sm transition-shadow">
-                  <CardContent className="p-4 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-[var(--primary)]/10 shrink-0">
-                        <Gift className="w-4 h-4 text-[var(--primary)]" />
-                      </span>
-                      <Badge variant="outline" className="text-[10px] border-[var(--primary)]/40 text-[var(--primary)]">Campanha</Badge>
-                    </div>
-                    <h3 className="font-semibold text-sm text-foreground leading-snug">{c.titulo}</h3>
-                    <p className="text-xs text-muted-foreground line-clamp-3 leading-relaxed">{c.corpo}</p>
-                    <div className="flex items-center gap-3 pt-1 text-[11px] text-muted-foreground">
-                      <span className="truncate">{c.autor}</span>
-                      <span className="flex items-center gap-1 shrink-0"><Calendar className="w-3 h-3" />até {c.data_validade}</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </section>
-        )}
 
-        {/* ── Notícias ── */}
-        {mostrarNoticias && noticias.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide flex items-center gap-2">
-            <Newspaper className="w-4 h-4 text-[var(--primary)]" /> Notícias
-          </h2>
-
-          {/* Destaque */}
-          {noticiaDestaque && (
-            <Card className="overflow-hidden border border-border/70 shadow-none hover:shadow-sm transition-shadow cursor-pointer group">
-              <div className="h-48 sm:h-60 w-full overflow-hidden bg-muted">
-                <img
-                  src={noticiaDestaque.imagem_url}
-                  alt={noticiaDestaque.titulo}
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                />
+          {/* ── Campanhas & Benefícios ── */}
+          {mostrarCampanhas && campanhasFiltradas.length > 0 && (
+            <section className="space-y-3">
+              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide flex items-center gap-2">
+                <Megaphone className="w-4 h-4 text-[var(--primary)]" /> Campanhas &amp; Benefícios
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {campanhasFiltradas.map((c) => (
+                  <Card key={c.id} className="overflow-hidden border border-[var(--primary)]/30 bg-[var(--primary)]/[0.04] shadow-none hover:shadow-sm transition-shadow">
+                    <CardContent className="p-4 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-[var(--primary)]/10 shrink-0">
+                          <Gift className="w-4 h-4 text-[var(--primary)]" />
+                        </span>
+                        <Badge variant="outline" className="text-[10px] border-[var(--primary)]/40 text-[var(--primary)]">Campanha</Badge>
+                      </div>
+                      <h3 className="font-semibold text-sm text-foreground leading-snug">{c.titulo}</h3>
+                      <p className="text-xs text-muted-foreground line-clamp-3 leading-relaxed">{c.corpo}</p>
+                      <div className="flex items-center gap-3 pt-1 text-[11px] text-muted-foreground">
+                        <span className="truncate">{c.autor}</span>
+                        <span className="flex items-center gap-1 shrink-0"><Calendar className="w-3 h-3" />até {c.data_validade}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
-              <CardContent className="p-5 space-y-2">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-[10px] border-[var(--primary)]/40 text-[var(--primary)]">
-                    {noticiaDestaque.tag}
-                  </Badge>
-                  <Badge variant="secondary" className="text-[10px]">Destaque</Badge>
-                </div>
-                <h3 className="font-bold text-base text-foreground leading-snug group-hover:text-[var(--primary)] transition-colors">
-                  {noticiaDestaque.titulo}
-                </h3>
-                <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2">
-                  {noticiaDestaque.resumo}
-                </p>
-                <div className="flex items-center justify-between pt-1">
-                  <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-                    <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{formatDate(noticiaDestaque.data)}</span>
-                    <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{noticiaDestaque.tempo_leitura_min} min</span>
-                  </div>
-                  <span className="flex items-center gap-1 text-xs font-medium text-[var(--primary)]">
-                    Ler mais <ChevronRight className="w-3.5 h-3.5" />
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
+            </section>
           )}
 
-          {/* Grelha secundária */}
-          {noticiasSec.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {noticiasSec.map((n) => (
-                <Card key={n.id} className="overflow-hidden border border-border/70 shadow-none hover:shadow-sm transition-shadow cursor-pointer group">
-                  <div className="h-36 w-full overflow-hidden bg-muted">
-                    <img src={n.imagem_url} alt={n.titulo} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+          {/* ── Notícias ── */}
+          {mostrarNoticias && noticias.length > 0 && (
+            <section className="space-y-3">
+              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wide flex items-center gap-2">
+                <Newspaper className="w-4 h-4 text-[var(--primary)]" /> Notícias
+              </h2>
+
+              {/* Destaque */}
+              {noticiaDestaque && (
+                <Card
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setNoticiaAberta(noticiaDestaque)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setNoticiaAberta(noticiaDestaque) } }}
+                  className="overflow-hidden border border-border/70 shadow-none hover:shadow-sm transition-shadow cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]/40"
+                >
+                  <div className="h-48 sm:h-60 w-full overflow-hidden bg-muted relative">
+                    {noticiaDestaque.imagem_url ? (
+                      <img
+                        src={noticiaDestaque.imagem_url}
+                        alt={noticiaDestaque.titulo}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling?.removeAttribute('style') }}
+                      />
+                    ) : null}
+                    <div className="absolute inset-0" style={noticiaDestaque.imagem_url ? {} : {}}>
+                      {!noticiaDestaque.imagem_url && <NoImagePlaceholder tag={noticiaDestaque.tag ?? undefined} />}
+                    </div>
                   </div>
-                  <CardContent className="p-4 space-y-2">
-                    <Badge variant="outline" className="text-[10px] border-[var(--primary)]/40 text-[var(--primary)]">{n.tag}</Badge>
-                    <h3 className="font-semibold text-sm text-foreground leading-snug group-hover:text-[var(--primary)] transition-colors">{n.titulo}</h3>
-                    <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{n.resumo}</p>
-                    <div className="flex items-center gap-3 pt-1 text-[11px] text-muted-foreground">
-                      <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{formatDate(n.data)}</span>
-                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{n.tempo_leitura_min} min</span>
+                  <CardContent className="p-5 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-[10px] border-[var(--primary)]/40 text-[var(--primary)]">
+                        {noticiaDestaque.tag}
+                      </Badge>
+                      <Badge variant="secondary" className="text-[10px]">Destaque</Badge>
+                    </div>
+                    <h3 className="font-bold text-base text-foreground leading-snug group-hover:text-[var(--primary)] transition-colors">
+                      {noticiaDestaque.titulo}
+                    </h3>
+                    <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2">
+                      {noticiaDestaque.resumo}
+                    </p>
+                    <div className="flex items-center justify-between pt-1">
+                      <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                        <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{formatDate(noticiaDestaque.data)}</span>
+                        <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{noticiaDestaque.tempo_leitura_min} min</span>
+                      </div>
+                      <span className="flex items-center gap-1 text-xs font-medium text-[var(--primary)]">
+                        Ler mais <ChevronRight className="w-3.5 h-3.5" />
+                      </span>
                     </div>
                   </CardContent>
                 </Card>
-              ))}
-            </div>
+              )}
+
+              {/* Grelha secundária */}
+              {noticiasSec.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {noticiasSec.map((n) => (
+                    <Card
+                      key={n.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setNoticiaAberta(n)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setNoticiaAberta(n) } }}
+                      className="overflow-hidden border border-border/70 shadow-none hover:shadow-sm transition-shadow cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]/40 flex flex-col"
+                    >
+                      <div className="min-h-[140px] w-full overflow-hidden bg-muted relative">
+                        {n.imagem_url ? (
+                          <img
+                            src={n.imagem_url}
+                            alt={n.titulo}
+                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 absolute inset-0"
+                            onError={(e) => { e.currentTarget.style.display = 'none' }}
+                          />
+                        ) : (
+                          <NoImagePlaceholder tag={n.tag ?? undefined} />
+                        )}
+                      </div>
+                      <CardContent className="p-4 space-y-2 flex-1 flex flex-col">
+                        <Badge variant="outline" className="text-[10px] border-[var(--primary)]/40 text-[var(--primary)] self-start">{n.tag}</Badge>
+                        <h3 className="font-semibold text-sm text-foreground leading-snug group-hover:text-[var(--primary)] transition-colors flex-1">{n.titulo}</h3>
+                        <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{n.resumo}</p>
+                        <div className="flex items-center justify-between pt-1">
+                          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                            <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{formatDate(n.data)}</span>
+                            <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{n.tempo_leitura_min} min</span>
+                          </div>
+                          <span className="flex items-center gap-1 text-xs font-medium text-[var(--primary)]">
+                            Ler <ChevronRight className="w-3 h-3" />
+                          </span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </section>
           )}
-        </section>
-        )}
         </div>
       )}
 
@@ -349,29 +449,91 @@ function NoticiasPage() {
         </>
       )}
 
-      {/* Modal Criar Notícia */}
+      {/* ── Modal de leitura ── */}
+      {noticiaAberta && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => setNoticiaAberta(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={noticiaAberta.titulo}
+            className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-card rounded-2xl shadow-2xl border border-border/50 flex flex-col animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              aria-label="Fechar"
+              onClick={() => setNoticiaAberta(null)}
+              className="absolute top-4 right-4 z-10 p-2 rounded-full bg-black/20 hover:bg-black/40 text-white backdrop-blur-md transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {noticiaAberta.imagem_url ? (
+              <div className="w-full h-64 sm:h-80 relative shrink-0">
+                <img
+                  src={noticiaAberta.imagem_url}
+                  alt={noticiaAberta.titulo}
+                  className="w-full h-full object-cover"
+                  onError={(e) => { e.currentTarget.style.display = 'none' }}
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-background/90 via-background/20 to-transparent" />
+                <div className="absolute bottom-4 left-6 right-6">
+                  {noticiaAberta.tag && (
+                    <span className="inline-block px-3 py-1 mb-3 text-xs font-bold text-white rounded-full bg-[var(--primary)]/90">
+                      {noticiaAberta.tag}
+                    </span>
+                  )}
+                  <h2 className="text-2xl sm:text-3xl font-bold text-white leading-tight">{noticiaAberta.titulo}</h2>
+                </div>
+              </div>
+            ) : (
+              <div className="w-full h-28 bg-muted/40 flex items-center justify-center shrink-0 border-b border-border/30">
+                <NoImagePlaceholder tag={noticiaAberta.tag ?? undefined} />
+              </div>
+            )}
+
+            <div className="p-6 sm:p-8 space-y-6">
+              {!noticiaAberta.imagem_url && (
+                <h2 className="text-2xl font-bold text-foreground leading-tight">{noticiaAberta.titulo}</h2>
+              )}
+              <div className="flex items-center gap-4 text-sm text-muted-foreground font-medium border-b border-border/50 pb-4">
+                <span className="flex items-center gap-1.5"><Calendar className="w-4 h-4" /> {formatDate(noticiaAberta.data)}</span>
+                <span className="flex items-center gap-1.5"><Clock className="w-4 h-4" /> {noticiaAberta.tempo_leitura_min} min</span>
+              </div>
+              <div className="text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                {noticiaAberta.conteudo || noticiaAberta.resumo}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal Criar Notícia ── */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-card w-full max-w-lg rounded-2xl border border-border shadow-lg overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="bg-card w-full max-w-lg rounded-2xl border border-border shadow-lg overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 bg-muted/20">
               <h2 className="text-lg font-semibold text-foreground">Nova Notícia / Evento</h2>
               <button onClick={() => setIsModalOpen(false)} className="p-2 -mr-2 rounded-full hover:bg-muted text-muted-foreground transition-colors">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <form onSubmit={(e) => void handleCreate(e)} className="flex flex-col overflow-y-auto p-6 gap-5">
               {createError && (
                 <div className="p-3 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md">
                   {createError}
                 </div>
               )}
-              
+
               <div className="space-y-2">
                 <Label htmlFor="titulo">Título</Label>
                 <Input id="titulo" required value={formData.titulo} onChange={e => setFormData({...formData, titulo: e.target.value})} placeholder="Título da notícia" />
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="resumo">Resumo (breve introdução)</Label>
                 <textarea id="resumo" required rows={3} value={formData.resumo} onChange={e => setFormData({...formData, resumo: e.target.value})} placeholder="Um texto curto para aparecer nos cartões" className="w-full p-3 text-sm rounded-md border border-input bg-background text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" />
@@ -388,19 +550,36 @@ function NoticiasPage() {
                   <Input id="categoria" value={formData.categoria} onChange={e => setFormData({...formData, categoria: e.target.value})} placeholder="Ex: Eventos, Geral, Avisos" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="imagem_url">URL da Imagem (opcional)</Label>
-                  <Input id="imagem_url" value={(formData.imagem_url || '').startsWith('data:') ? '' : formData.imagem_url} onChange={e => setFormData({...formData, imagem_url: e.target.value})} placeholder="ou colar um link https://..." />
+                  <Label htmlFor="tempo_leitura_min">Tempo de leitura (min)</Label>
+                  <Input
+                    id="tempo_leitura_min"
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={formData.tempo_leitura_min}
+                    onChange={e => setFormData({...formData, tempo_leitura_min: Number(e.target.value)})}
+                  />
                 </div>
               </div>
 
               <div className="space-y-2">
+                <Label htmlFor="imagem_url">URL da Imagem (opcional)</Label>
+                <Input id="imagem_url" value={(formData.imagem_url || '').startsWith('data:') ? '' : formData.imagem_url} onChange={e => { setFormData({...formData, imagem_url: e.target.value}); setImgPreviewError(false) }} placeholder="ou colar um link https://..." />
+              </div>
+
+              <div className="space-y-2">
                 <Label>Imagem do dispositivo</Label>
-                {formData.imagem_url ? (
+                {formData.imagem_url && !imgPreviewError ? (
                   <div className="relative w-full">
-                    <img src={formData.imagem_url} alt="Pré-visualização" className="h-32 w-full rounded-md border border-border object-cover" />
+                    <img
+                      src={formData.imagem_url}
+                      alt="Pré-visualização"
+                      className="h-32 w-full rounded-md border border-border object-cover"
+                      onError={() => setImgPreviewError(true)}
+                    />
                     <button
                       type="button"
-                      onClick={() => setFormData({ ...formData, imagem_url: '' })}
+                      onClick={() => { setFormData({ ...formData, imagem_url: '' }); setImgPreviewError(false) }}
                       aria-label="Remover imagem"
                       className="absolute right-2 top-2 rounded-full bg-black/50 p-1 text-white transition-colors hover:bg-black/70"
                     >
